@@ -1,0 +1,6 @@
+@nostalgia_ai_backend_HostAddress = http://localhost:5110
+
+GET {{nostalgia_ai_backend_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
