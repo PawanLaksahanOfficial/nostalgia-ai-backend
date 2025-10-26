@@ -3,7 +3,20 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.8.34330.188
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "nostalgia-ai-backend", "nostalgia-ai-backend\nostalgia-ai-backend.csproj", "{E2AE2B8B-B20A-4C0C-870B-08F3D7BC60FB}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "nostalgia-ai-backend", "nostalgia-ai-backend\nostalgia-ai-backend.csproj", "{E2AE2B8B-B20A-4C0C-870B-08F3D7BC60FB}"
+	ProjectSection(ProjectDependencies) = postProject
+		{6CB6E0AB-78F8-45E6-BE10-688BD51F90B8} = {6CB6E0AB-78F8-45E6-BE10-688BD51F90B8}
+		{A437EF52-F24F-47FE-BC5E-82644071C041} = {A437EF52-F24F-47FE-BC5E-82644071C041}
+	EndProjectSection
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Application", "Application\Application.csproj", "{6CB6E0AB-78F8-45E6-BE10-688BD51F90B8}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Domain", "Domian\Domain.csproj", "{DEC539B9-A33A-40B2-9899-CAC5C80F6E5C}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Infrastructure", "Infrastructure\Infrastructure.csproj", "{A437EF52-F24F-47FE-BC5E-82644071C041}"
+	ProjectSection(ProjectDependencies) = postProject
+		{DEC539B9-A33A-40B2-9899-CAC5C80F6E5C} = {DEC539B9-A33A-40B2-9899-CAC5C80F6E5C}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +28,18 @@ Global
 		{E2AE2B8B-B20A-4C0C-870B-08F3D7BC60FB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E2AE2B8B-B20A-4C0C-870B-08F3D7BC60FB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E2AE2B8B-B20A-4C0C-870B-08F3D7BC60FB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6CB6E0AB-78F8-45E6-BE10-688BD51F90B8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6CB6E0AB-78F8-45E6-BE10-688BD51F90B8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6CB6E0AB-78F8-45E6-BE10-688BD51F90B8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6CB6E0AB-78F8-45E6-BE10-688BD51F90B8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DEC539B9-A33A-40B2-9899-CAC5C80F6E5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DEC539B9-A33A-40B2-9899-CAC5C80F6E5C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DEC539B9-A33A-40B2-9899-CAC5C80F6E5C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DEC539B9-A33A-40B2-9899-CAC5C80F6E5C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A437EF52-F24F-47FE-BC5E-82644071C041}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A437EF52-F24F-47FE-BC5E-82644071C041}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A437EF52-F24F-47FE-BC5E-82644071C041}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A437EF52-F24F-47FE-BC5E-82644071C041}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
