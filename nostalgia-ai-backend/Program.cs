@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Infrastructure.Data;
 using System;
+using Application.Interfaces;
+using Infrastructure.AI;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,10 +14,11 @@ builder.Services.AddSwaggerGen();
 // Database
 builder.Services.AddDbContext<EFDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
-    
+
 
 
 // Dependency Injection for Application Services
+builder.Services.AddScoped<IAIService, AIService>();
 
 
 var app = builder.Build();
