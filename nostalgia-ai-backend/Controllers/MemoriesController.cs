@@ -16,7 +16,7 @@ namespace nostalgia_ai_backend.Controllers
         }
 
         [HttpPost("generate")]
-        public async Task<IActionResult> GenerateNostalgicFeeling([FromBody] string userPrompt)
+        public async Task<ActionResult<string>> GenerateNostalgicFeeling([FromBody] string userPrompt)
         {
             try
             {
