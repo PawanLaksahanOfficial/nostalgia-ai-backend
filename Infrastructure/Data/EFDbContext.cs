@@ -1,10 +1,5 @@
 ﻿using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Infrastructure.Data
 {
@@ -15,10 +10,19 @@ namespace Infrastructure.Data
 
         public DbSet<Memory> Memories { get; set; }
         public DbSet<User> Users { get; set; }
+        public DbSet<UserMemory> UserMemories { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<UserMemory>(entity =>
+            {
+                entity.HasOne(um => um.User)
+                      .WithMany(u => u.Memories)
+                      .HasForeignKey(um => um.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
         }
     }
 }

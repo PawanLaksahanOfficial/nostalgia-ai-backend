@@ -11,7 +11,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "nostalgia-ai-backend", "nos
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Application", "Application\Application.csproj", "{6CB6E0AB-78F8-45E6-BE10-688BD51F90B8}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Domain", "Domian\Domain.csproj", "{DEC539B9-A33A-40B2-9899-CAC5C80F6E5C}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Domain", "Domain\Domain.csproj", "{DEC539B9-A33A-40B2-9899-CAC5C80F6E5C}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Infrastructure", "Infrastructure\Infrastructure.csproj", "{A437EF52-F24F-47FE-BC5E-82644071C041}"
 	ProjectSection(ProjectDependencies) = postProject

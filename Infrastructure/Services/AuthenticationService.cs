@@ -1,8 +1,6 @@
 ﻿using Application.DTOs;
 using Application.Interfaces;
-using Azure.Core;
 using Google.Apis.Auth;
-using System.Net.Http;
 using Infrastructure.Data;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
