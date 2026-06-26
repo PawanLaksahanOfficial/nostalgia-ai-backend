@@ -17,12 +17,17 @@ namespace Infrastructure.Repositories
 
         public async Task<User?> GetUserByEmailAsync(string email)
         {
-            var user = await _dbContext.Users.FirstOrDefaultAsync((x => x.Email == email && x.Active && !x.Deleted));
-            if (user != null) 
-            {
-                return user;
-            }
-            return null;
+            return await _dbContext.Users.FirstOrDefaultAsync(x => x.Email == email && x.Active && !x.Deleted);
+        }
+
+        public async Task<User?> GetUserByEmailIncludingDeletedAsync(string email)
+        {
+            return await _dbContext.Users.FirstOrDefaultAsync(x => x.Email == email);
+        }
+
+        public async Task<User?> GetByIdAsync(int userId)
+        {
+            return await _dbContext.Users.FindAsync(userId);
         }
 
         public async Task<bool> UpdateUserLoginStatusAsync(User user)
@@ -47,6 +52,64 @@ namespace Infrastructure.Repositories
                 Deleted = false
             };
             _dbContext.Users.Add(user);
+            var rows = await _dbContext.SaveChangesAsync();
+            return rows > 0;
+        }
+
+        public async Task<bool> UpdatePasswordAsync(int userId, string passwordHash)
+        {
+            var user = await _dbContext.Users.FindAsync(userId);
+            if (user == null) return false;
+            user.PasswordHash = passwordHash;
+            user.LastUpdatedDate = DateTime.UtcNow;
+            var rows = await _dbContext.SaveChangesAsync();
+            return rows > 0;
+        }
+
+        public async Task<int> CreatePasswordResetTokenAsync(PasswordResetToken resetToken)
+        {
+            _dbContext.PasswordResetTokens.Add(resetToken);
+            await _dbContext.SaveChangesAsync();
+            return resetToken.Id;
+        }
+
+        public async Task<PasswordResetToken?> ValidatePasswordResetTokenAsync(string email, string token)
+        {
+            return await _dbContext.PasswordResetTokens
+                .Include(prt => prt.User)
+                .FirstOrDefaultAsync(prt => 
+                    prt.User.Email == email && 
+                    prt.Token == token && 
+                    !prt.Used && 
+                    prt.ExpiresAt > DateTime.UtcNow);
+        }
+
+        public async Task<bool> MarkResetTokenAsUsedAsync(int tokenId)
+        {
+            var token = await _dbContext.PasswordResetTokens.FindAsync(tokenId);
+            if (token == null) return false;
+            token.Used = true;
+            var rows = await _dbContext.SaveChangesAsync();
+            return rows > 0;
+        }
+
+        public async Task<bool> UpdateProfileAsync(int userId, UpdateProfileRequest request)
+        {
+            var user = await _dbContext.Users.FindAsync(userId);
+            if (user == null) return false;
+            if (!string.IsNullOrEmpty(request.FirstName))
+            {
+                user.FirstName = request.FirstName;
+            } 
+            if (!string.IsNullOrEmpty(request.LastName))
+            {
+                user.LastName = request.LastName;
+            }    
+            if (request.AvatarUrl != null)
+            {
+                user.AvatarUrl = request.AvatarUrl;
+            }
+            user.LastUpdatedDate = DateTime.UtcNow;
             var rows = await _dbContext.SaveChangesAsync();
             return rows > 0;
         }
