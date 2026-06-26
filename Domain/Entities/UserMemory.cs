@@ -33,6 +33,9 @@ namespace Domain.Entities
         public string? GeneratedMusicPath { get; set; }
         public string? VoiceoverPath { get; set; }
         public string? FinalVideoPath { get; set; }
+        public string? ThumbnailPath { get; set; }
+        public string? ShareToken { get; set; }
+        public DateTime? ShareExpiresAt { get; set; }
         public VideoStatus Status { get; set; } = VideoStatus.Pending;
         public VideoQuality Quality { get; set; } = VideoQuality.Standard;
         public bool IsPublic { get; set; }
