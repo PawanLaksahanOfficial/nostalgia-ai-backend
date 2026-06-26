@@ -9,5 +9,8 @@ namespace Application.Interfaces
         Task<int> CreateAsync(UserMemory memory);
         Task<bool> UpdateAsync(UserMemory memory);
         Task<bool> DeleteAsync(int id);
+        Task<UserMemory?> GetByShareTokenAsync(string shareToken);
+        Task<IEnumerable<UserMemory>> GetPublicMemoriesAsync();
+        Task IncrementViewCountAsync(int memoryId);
     }
 }

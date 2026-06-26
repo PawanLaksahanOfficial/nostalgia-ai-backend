@@ -52,5 +52,29 @@ namespace Infrastructure.Repositories
             var rows = await _dbContext.SaveChangesAsync();
             return rows > 0;
         }
+
+        public async Task<UserMemory?> GetByShareTokenAsync(string shareToken)
+        {
+            return await _dbContext.UserMemories
+                .Include(m => m.User)
+                .FirstOrDefaultAsync(m => m.ShareToken == shareToken && m.IsPublic);
+        }
+
+        public async Task<IEnumerable<UserMemory>> GetPublicMemoriesAsync()
+        {
+            return await _dbContext.UserMemories
+                .Where(m => m.IsPublic && m.Status == VideoStatus.Completed)
+                .OrderByDescending(m => m.CreatedAt)
+                .Take(50)
+                .ToListAsync();
+        }
+
+        public async Task IncrementViewCountAsync(int memoryId)
+        {
+            var memory = await _dbContext.UserMemories.FindAsync(memoryId);
+            if (memory == null) return;
+            memory.ViewCount++;
+            await _dbContext.SaveChangesAsync();
+        }
     }
 }
