@@ -42,5 +42,8 @@ namespace Domain.Entities
         public int ViewCount { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? CompletedAt { get; set; }
+        public ICollection<Like> Likes { get; set; } = new List<Like>();
+        public ICollection<Comment> Comments { get; set; } = new List<Comment>();
+        public ICollection<Collection> Collections { get; set; } = new List<Collection>();
     }
 }
