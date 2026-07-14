@@ -65,6 +65,8 @@ builder.Services.AddScoped<IAIService, AIService>();
 builder.Services.AddScoped<IUserRepository, EfUserRepository>();
 builder.Services.AddScoped<IMemoryRepository, EfMemoryRepository>();
 builder.Services.AddScoped<IFileStorage, LocalFileStorage>();
+builder.Services.AddScoped<IPasswordHasher, PasswordHasherService>();
+builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddHttpClient<IAuthenticationService, AuthenticationService>();
 
 // Background Worker for Video Processing
