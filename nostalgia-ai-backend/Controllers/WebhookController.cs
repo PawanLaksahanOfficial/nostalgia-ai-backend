@@ -1,7 +1,6 @@
+using Application.DTOs;
 using Application.Interfaces;
-using Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 using Stripe;
 
 namespace nostalgia_ai_backend.Controllers
@@ -27,7 +26,7 @@ namespace nostalgia_ai_backend.Controllers
             var webhookSecret = _configuration["Stripe:WebhookSecret"];
             if (string.IsNullOrEmpty(webhookSecret))
             {
-                return BadRequest("Stripe webhook secret not configured.");
+                return BadRequest(ApiResponse.Fail("Stripe webhook secret not configured."));
             }
             try
             {
@@ -54,11 +53,12 @@ namespace nostalgia_ai_backend.Controllers
                         await HandlePaymentFailed(stripeEvent);
                         break;
                 }
-                return Ok();
+
+                return Ok(ApiResponse.Ok("Webhook processed successfully."));
             }
             catch (Exception ex)
             {
-                return BadRequest($"Webhook error: {ex.Message}");
+                return BadRequest(ApiResponse.Fail($"Webhook error: {ex.Message}"));
             }
         }
 
@@ -66,8 +66,7 @@ namespace nostalgia_ai_backend.Controllers
         {
             var session = stripeEvent.Data.Object as Stripe.Checkout.Session;
             if (session == null) return;
-            var userIdStr = session.Metadata?.GetValueOrDefault("userId");
-            await _subscriptionService.HandleCheckoutSessionCompletedAsync(userIdStr);
+            await _subscriptionService.HandleCheckoutSessionCompletedAsync(session.Id);
         }
 
         private async Task HandleSubscriptionCreated(Event stripeEvent)
@@ -76,6 +75,7 @@ namespace nostalgia_ai_backend.Controllers
             if (subscription == null) return;
             var customerId = subscription.CustomerId;
             if (string.IsNullOrEmpty(customerId)) return;
+
             await _subscriptionService.HandleSubscriptionCreatedAsync(customerId, subscription.Id);
         }
 

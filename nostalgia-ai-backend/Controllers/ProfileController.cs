@@ -1,10 +1,8 @@
 using Application.DTOs;
 using Application.Interfaces;
 using Domain.Entities;
-using Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace nostalgia_ai_backend.Controllers
@@ -14,30 +12,36 @@ namespace nostalgia_ai_backend.Controllers
     [Authorize]
     public class ProfileController : ControllerBase
     {
-        private readonly EFDbContext _dbContext;
         private readonly IUserRepository _userRepository;
         private readonly ISubscriptionService _subscriptionService;
+        private readonly IMemoryRepository _memoryRepository;
+        private readonly IPasswordHasher _passwordHasher;
 
-        public ProfileController(EFDbContext dbContext, IUserRepository userRepository, ISubscriptionService subscriptionService)
+        public ProfileController(
+            IUserRepository userRepository,
+            ISubscriptionService subscriptionService,
+            IMemoryRepository memoryRepository,
+            IPasswordHasher passwordHasher)
         {
-            _dbContext = dbContext;
             _userRepository = userRepository;
             _subscriptionService = subscriptionService;
+            _memoryRepository = memoryRepository;
+            _passwordHasher = passwordHasher;
         }
 
-        [HttpGet("me")]
-        public async Task<ActionResult> GetMyProfile()
+        [HttpGet("myProfile")]
+        public async Task<ActionResult<ApiResponse<object>>> GetMyProfile()
         {
             try
             {
                 var userId = GetUserId();
                 var user = await _userRepository.GetByIdAsync(userId);
-                if (user == null) 
+                if (user == null)
                 {
-                    return NotFound("User not found.");
+                    return NotFound(ApiResponse<object>.NotFound("User not found."));
                 }
                 var quota = await _subscriptionService.GetUsageQuotaAsync(userId);
-                return Ok(new
+                var profile = new
                 {
                     user.UserId,
                     user.FirstName,
@@ -46,35 +50,38 @@ namespace nostalgia_ai_backend.Controllers
                     user.AvatarUrl,
                     Tier = user.Tier.ToString().ToLower(),
                     Quota = quota
-                });
+                };
+
+                return Ok(ApiResponse<object>.Ok(profile));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
 
-        [HttpPut("me")]
-        public async Task<ActionResult> UpdateProfile([FromBody] UpdateProfileRequest request)
+        [HttpPut("myProfile")]
+        public async Task<ActionResult<ApiResponse<object>>> UpdateProfile([FromBody] UpdateProfileRequest request)
         {
             try
             {
                 var userId = GetUserId();
                 var result = await _userRepository.UpdateProfileAsync(userId, request);
-                if (!result) 
+                if (!result)
                 {
-                    return NotFound("User not found.");
+                    return NotFound(ApiResponse<object>.NotFound("User not found."));
                 }
-                return Ok(new { message = "Profile updated successfully." });
+
+                return Ok(ApiResponse<object>.Ok(new { }, "Profile updated successfully."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
 
         [HttpPut("change-password")]
-        public async Task<ActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
+        public async Task<ActionResult<ApiResponse<object>>> ChangePassword([FromBody] ChangePasswordRequest request)
         {
             try
             {
@@ -82,62 +89,52 @@ namespace nostalgia_ai_backend.Controllers
                 var user = await _userRepository.GetByIdAsync(userId);
                 if (user == null || string.IsNullOrEmpty(user.PasswordHash))
                 {
-                    return BadRequest("Password authentication not set up for this account.");
+                    return BadRequest(ApiResponse<object>.Fail("Password authentication not set up for this account."));
                 }
-                var passwordHasher = new Infrastructure.Services.PasswordHasherService();
-                if (!passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
+
+                if (!_passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
                 {
-                    return BadRequest("Current password is incorrect.");
+                    return BadRequest(ApiResponse<object>.Fail("Current password is incorrect."));
                 }
-                var newHash = passwordHasher.Hash(request.NewPassword);
-                await _userRepository.UpdatePasswordAsync(userId, newHash);
-                return Ok(new { message = "Password changed successfully." });
+
+                var newHash = _passwordHasher.Hash(request.NewPassword);
+                var passwordUpdated = await _userRepository.UpdatePasswordAsync(userId, newHash);
+                if (!passwordUpdated)
+                {
+                    return BadRequest(ApiResponse<object>.Fail("Failed to update password."));
+                }
+
+                return Ok(ApiResponse<object>.Ok(new { }, "Password changed successfully."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
 
         [HttpGet("memories")]
-        public async Task<ActionResult> GetMyMemories()
+        public async Task<ActionResult<ApiResponse<object>>> GetMyMemories()
         {
             try
             {
                 var userId = GetUserId();
-                var memories = await _dbContext.UserMemories
-                    .Where(m => m.UserId == userId)
-                    .OrderByDescending(m => m.CreatedAt)
-                    .Select(m => new
-                    {
-                        m.Id,
-                        m.Title,
-                        m.Status,
-                        m.CreatedAt,
-                        m.CompletedAt,
-                        HasVideo = !string.IsNullOrEmpty(m.FinalVideoPath)
-                    })
-                    .ToListAsync();
-                return Ok(memories);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ex.Message);
-            }
-        }
+                var memories = await _memoryRepository.GetByUserIdAsync(userId);
 
-        [HttpGet("quota")]
-        public async Task<ActionResult> GetUsageQuota()
-        {
-            try
-            {
-                var userId = GetUserId();
-                var quota = await _subscriptionService.GetUsageQuotaAsync(userId);
-                return Ok(quota);
+                var result = memories.Select(m => new
+                {
+                    m.Id,
+                    m.Title,
+                    m.Status,
+                    m.CreatedAt,
+                    m.CompletedAt,
+                    HasVideo = !string.IsNullOrEmpty(m.FinalVideoPath)
+                });
+
+                return Ok(ApiResponse<object>.Ok(result));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
 

@@ -1,14 +1,7 @@
 using Application.DTOs;
 using Application.Interfaces;
 using Domain.Entities;
-using Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 
 namespace nostalgia_ai_backend.Controllers
 {
@@ -16,100 +9,110 @@ namespace nostalgia_ai_backend.Controllers
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
-        private readonly EFDbContext _dbContext;
         private readonly IPasswordHasher _passwordHasher;
-        private readonly IConfiguration _configuration;
         private readonly IUserRepository _userRepository;
+        private readonly IAuthenticationService _authenticationService;
+        private readonly IEmailService _emailService;
 
-        public AuthController(EFDbContext dbContext, IPasswordHasher passwordHasher, IConfiguration configuration, IUserRepository userRepository)
+        public AuthController(
+            IPasswordHasher passwordHasher,
+            IUserRepository userRepository,
+            IAuthenticationService authenticationService,
+            IEmailService emailService)
         {
-            _dbContext = dbContext;
             _passwordHasher = passwordHasher;
-            _configuration = configuration;
             _userRepository = userRepository;
+            _authenticationService = authenticationService;
+            _emailService = emailService;
         }
 
         [HttpPost("register")]
-        public async Task<ActionResult<AuthResponse>> Register([FromBody] RegisterRequest request)
+        public async Task<ActionResult<ApiResponse<AuthResponse>>> Register([FromBody] RegisterRequest request)
         {
             try
             {
                 var existingUser = await _userRepository.GetUserByEmailIncludingDeletedAsync(request.Email);
+
+                // If user exists and is active, return conflict
                 if (existingUser != null && !existingUser.Deleted)
                 {
-                    return BadRequest("Email already registered.");
+                    return Conflict(ApiResponse<AuthResponse>.Fail("Email already registered."));
                 }
+
+                var passwordHash = _passwordHasher.Hash(request.Password);
+
+                // If user exists but is deleted, reactivate
                 if (existingUser != null && existingUser.Deleted)
                 {
-                    existingUser.FirstName = request.FirstName;
-                    existingUser.LastName = request.LastName;
-                    existingUser.PasswordHash = _passwordHasher.Hash(request.Password);
-                    existingUser.Deleted = false;
-                    existingUser.Active = true;
-                    existingUser.LastUpdatedDate = DateTime.UtcNow;
-                    await _dbContext.SaveChangesAsync();
-                    return Ok(CreateAuthResponse(existingUser));
+                    var reactivatedUser = await _userRepository.ReactivateDeletedUserAsync(existingUser, request, passwordHash);
+                    if (reactivatedUser == null)
+                    {
+                        return BadRequest(ApiResponse<AuthResponse>.Fail("Failed to reactivate account."));
+                    }
+
+                    var response = CreateAuthResponse(reactivatedUser);
+                    return Ok(ApiResponse<AuthResponse>.Ok(response, "Account reactivated successfully."));
                 }
-                var user = new User
+
+                // Create new user
+                var newUser = await _userRepository.RegisterUserAsync(request, passwordHash);
+                if (newUser == null)
                 {
-                    FirstName = request.FirstName,
-                    LastName = request.LastName,
-                    Email = request.Email,
-                    PasswordHash = _passwordHasher.Hash(request.Password),
-                    CreatedDate = DateTime.UtcNow,
-                    LastUpdatedDate = DateTime.UtcNow,
-                    LastSignInDate = DateTime.UtcNow,
-                    Active = true,
-                    Deleted = false,
-                    Tier = UserTier.Free,
-                    MonthlyMemoryCount = 0,
-                    MonthlyCountResetDate = DateTime.UtcNow
-                };
-                _dbContext.Users.Add(user);
-                await _dbContext.SaveChangesAsync();
-                return Ok(CreateAuthResponse(user));
+                    return BadRequest(ApiResponse<AuthResponse>.Fail("Failed to create account."));
+                }
+
+                var authResponse = CreateAuthResponse(newUser);
+                return Ok(ApiResponse<AuthResponse>.Ok(authResponse, "Registration successful."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<AuthResponse>.Fail(ex.Message));
             }
         }
 
         [HttpPost("login")]
-        public async Task<ActionResult<AuthResponse>> Login([FromBody] LoginRequest request)
+        public async Task<ActionResult<ApiResponse<AuthResponse>>> Login([FromBody] LoginRequest request)
         {
             try
             {
                 var user = await _userRepository.GetUserByEmailAsync(request.Email);
                 if (user == null || string.IsNullOrEmpty(user.PasswordHash))
                 {
-                    return Unauthorized("Invalid email or password.");
+                    return Unauthorized(ApiResponse<AuthResponse>.Fail("Invalid email or password."));
                 }
+
                 if (!_passwordHasher.Verify(request.Password, user.PasswordHash))
                 {
-                    return Unauthorized("Invalid email or password.");
+                    return Unauthorized(ApiResponse<AuthResponse>.Fail("Invalid email or password."));
                 }
-                user.LastSignInDate = DateTime.UtcNow;
-                user.LastUpdatedDate = DateTime.UtcNow;
-                await _dbContext.SaveChangesAsync();
-                return Ok(CreateAuthResponse(user));
+
+                var loginUpdated = await _userRepository.UpdateUserLoginStatusAsync(user);
+                if (!loginUpdated)
+                {
+                    return BadRequest(ApiResponse<AuthResponse>.Fail("Failed to update login status."));
+                }
+
+                var response = CreateAuthResponse(user);
+                return Ok(ApiResponse<AuthResponse>.Ok(response, "Login successful."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<AuthResponse>.Fail(ex.Message));
             }
         }
 
         [HttpPost("forgot-password")]
-        public async Task<ActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
+        public async Task<ActionResult<ApiResponse<object>>> ForgotPassword([FromBody] ForgotPasswordRequest request)
         {
             try
             {
                 var user = await _userRepository.GetUserByEmailAsync(request.Email);
                 if (user == null || string.IsNullOrEmpty(user.PasswordHash))
                 {
-                    return Ok(new { message = "If an account exists, a reset email has been sent." });
+                    // Return success to prevent email enumeration
+                    return Ok(ApiResponse<object>.Ok(new { }, "If an account exists, a reset email has been sent."));
                 }
+
                 var resetToken = new PasswordResetToken
                 {
                     UserId = user.UserId,
@@ -118,35 +121,53 @@ namespace nostalgia_ai_backend.Controllers
                     Used = false,
                     CreatedAt = DateTime.UtcNow
                 };
-                await _userRepository.CreatePasswordResetTokenAsync(resetToken);
-                // TODO: Send email with reset link
-                // For now, return the token in dev mode
-                return Ok(new { message = "Reset token generated.", token = resetToken.Token });
+
+                var tokenCreated = await _userRepository.CreatePasswordResetTokenAsync(resetToken);
+                if (!tokenCreated)
+                {
+                    return BadRequest(ApiResponse<object>.Fail("Failed to generate reset token."));
+                }
+                var emailSent = await _emailService.SendPasswordResetEmailAsync(user.Email, resetToken.Token, $"{user.FirstName} {user.LastName}");
+                if (!emailSent)
+                {
+                    return BadRequest(ApiResponse<object>.Fail("Failed to send reset email. Please try again."));
+                }
+
+                return Ok(ApiResponse<object>.Ok(new { }, "A reset email has been sent."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
 
         [HttpPost("reset-password")]
-        public async Task<ActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
+        public async Task<ActionResult<ApiResponse<object>>> ResetPassword([FromBody] ResetPasswordRequest request)
         {
             try
             {
                 var resetToken = await _userRepository.ValidatePasswordResetTokenAsync(request.Email, request.Token);
                 if (resetToken == null)
                 {
-                    return BadRequest("Invalid or expired reset token.");
+                    return BadRequest(ApiResponse<object>.Fail("Invalid or expired reset token."));
                 }
                 var passwordHash = _passwordHasher.Hash(request.NewPassword);
-                await _userRepository.UpdatePasswordAsync(resetToken.UserId, passwordHash);
-                await _userRepository.MarkResetTokenAsUsedAsync(resetToken.Id);
-                return Ok(new { message = "Password reset successful." });
+                var passwordUpdated = await _userRepository.UpdatePasswordAsync(resetToken.UserId, passwordHash);
+                if (!passwordUpdated)
+                {
+                    return BadRequest(ApiResponse<object>.Fail("Failed to update password."));
+                }
+                var tokenMarked = await _userRepository.MarkResetTokenAsUsedAsync(resetToken.Id);
+                if (!tokenMarked)
+                {
+                    return BadRequest(ApiResponse<object>.Fail("Failed to mark token as used."));
+                }
+
+                return Ok(ApiResponse<object>.Ok(new { }, "Password reset successful."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
 
@@ -155,7 +176,7 @@ namespace nostalgia_ai_backend.Controllers
             var isPremium = user.Tier == UserTier.Premium;
             return new AuthResponse
             {
-                Token = GenerateJwtToken(user.UserId),
+                Token = _authenticationService.GenerateJwtToken(user.UserId),
                 User = new UserDto
                 {
                     UserId = user.UserId,
@@ -168,26 +189,6 @@ namespace nostalgia_ai_backend.Controllers
                     MonthlyMemoriesLimit = isPremium ? 100 : 3
                 }
             };
-        }
-
-        private string GenerateJwtToken(int userId)
-        {
-            var key = _configuration["JwtSettings:Key"];
-            if (string.IsNullOrEmpty(key)) return string.Empty;
-            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
-            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
-            var claims = new[]
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-            };
-            var token = new JwtSecurityToken(
-                issuer: _configuration["JwtSettings:Issuer"],
-                audience: _configuration["JwtSettings:Audience"],
-                claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(Convert.ToDouble(_configuration["JwtSettings:DurationInMinutes"])),
-                signingCredentials: credentials);
-            return new JwtSecurityTokenHandler().WriteToken(token);
         }
     }
 }

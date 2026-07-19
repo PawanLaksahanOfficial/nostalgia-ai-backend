@@ -1,4 +1,5 @@
-﻿using Application.Interfaces;
+﻿using Application.DTOs;
+using Application.Interfaces;
 using Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,29 +21,29 @@ namespace nostalgia_ai_backend.Controllers
         }
 
         [HttpPost("generate")]
-        public async Task<ActionResult<string>> GenerateNostalgicFeeling([FromBody] string userPrompt)
+        public async Task<ActionResult<ApiResponse<string>>> GenerateNostalgicFeeling([FromBody] string userPrompt)
         {
             try
             {
                 var result = await _aIService.GenerateNostalgicTextAsync(userPrompt);
-                return Ok(result);
+                return Ok(ApiResponse<string>.Ok(result));
             }
-            catch (Exception ex) 
+            catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<string>.Fail(ex.Message));
             }
         }
 
         [HttpPost("create")]
         [Authorize]
-        public async Task<ActionResult<int>> CreateMemoryVideo([FromBody] CreateMemoryRequest request)
+        public async Task<ActionResult<ApiResponse<object>>> CreateMemoryVideo([FromBody] CreateMemoryRequest request)
         {
             try
             {
                 var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
                 {
-                    return Unauthorized("Invalid user token.");
+                    return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
                 }
 
                 var memory = new UserMemory
@@ -58,69 +59,78 @@ namespace nostalgia_ai_backend.Controllers
                 };
 
                 var id = await _memoryRepository.CreateAsync(memory);
-                return Ok(new { jobId = id, status = "pending" });
+                if (id <= 0)
+                {
+                    return BadRequest(ApiResponse<object>.Fail("Failed to create memory."));
+                }
+
+                return Ok(ApiResponse<object>.Ok(new { jobId = id, status = "pending" }, "Memory creation queued."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
 
         [HttpGet("status/{id}")]
         [Authorize]
-        public async Task<ActionResult> GetMemoryStatus(int id)
+        public async Task<ActionResult<ApiResponse<object>>> GetMemoryStatus(int id)
         {
             try
             {
                 var memory = await _memoryRepository.GetByIdAsync(id);
                 if (memory == null)
                 {
-                    return NotFound("Memory not found.");
+                    return NotFound(ApiResponse<object>.NotFound("Memory not found."));
                 }
 
-                return Ok(new
+                var result = new
                 {
                     memory.Id,
                     memory.Title,
                     memory.Status,
                     memory.GeneratedNarrative,
-                    videoUrl = memory.FinalVideoPath,
+                    VideoUrl = memory.FinalVideoPath,
                     memory.CreatedAt,
                     memory.CompletedAt
-                });
+                };
+
+                return Ok(ApiResponse<object>.Ok(result));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
 
         [HttpGet("my")]
         [Authorize]
-        public async Task<ActionResult> GetMyMemories()
+        public async Task<ActionResult<ApiResponse<object>>> GetMyMemories()
         {
             try
             {
                 var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
                 {
-                    return Unauthorized("Invalid user token.");
+                    return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
                 }
 
                 var memories = await _memoryRepository.GetByUserIdAsync(userId);
-                return Ok(memories.Select(m => new
+                var result = memories.Select(m => new
                 {
                     m.Id,
                     m.Title,
                     m.Status,
                     m.CreatedAt,
                     m.CompletedAt,
-                    hasVideo = !string.IsNullOrEmpty(m.FinalVideoPath)
-                }));
+                    HasVideo = !string.IsNullOrEmpty(m.FinalVideoPath)
+                });
+
+                return Ok(ApiResponse<object>.Ok(result));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
     }

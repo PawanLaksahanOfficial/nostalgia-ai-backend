@@ -19,53 +19,60 @@ namespace nostalgia_ai_backend.Controllers
         }
 
         [HttpGet("quota")]
-        public async Task<ActionResult> GetQuota()
+        public async Task<ActionResult<ApiResponse<UsageQuota>>> GetQuota()
         {
             try
             {
                 var userId = GetUserId();
                 var quota = await _subscriptionService.GetUsageQuotaAsync(userId);
-                return Ok(quota);
+                return Ok(ApiResponse<UsageQuota>.Ok(quota));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return NotFound(ApiResponse<UsageQuota>.NotFound("User not found."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<UsageQuota>.Fail(ex.Message));
             }
         }
 
         [HttpPost("checkout")]
-        public async Task<ActionResult> CreateCheckoutSession([FromBody] CreateCheckoutSessionRequest request)
+        public async Task<ActionResult<ApiResponse<CheckoutSessionResponse>>> CreateCheckoutSession([FromBody] CreateCheckoutSessionRequest request)
         {
             try
             {
                 var userId = GetUserId();
-                var sessionId = await _subscriptionService.CreateCheckoutSessionAsync(
-                    userId, 
-                    request.PriceId, 
-                    request.SuccessUrl, 
+                var sessionResponse = await _subscriptionService.CreateCheckoutSessionAsync(
+                    userId,
+                    request.PriceId,
+                    request.SuccessUrl,
                     request.CancelUrl
                 );
-                return Ok(new CheckoutSessionResponse { SessionId = sessionId });
+
+                return Ok(ApiResponse<CheckoutSessionResponse>.Ok(sessionResponse));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return NotFound(ApiResponse<CheckoutSessionResponse>.NotFound("User not found."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<CheckoutSessionResponse>.Fail(ex.Message));
             }
         }
 
         [HttpPost("cancel")]
-        public async Task<ActionResult> CancelSubscription()
+        public async Task<ActionResult<ApiResponse<object>>> CancelSubscription()
         {
             try
             {
-                var userId = GetUserId();
                 // Later call Stripe to cancel the subscription
-                // For now, return success
-                return Ok(new { message = "Subscription cancellation initiated." });
+                return Ok(ApiResponse<object>.Ok(new { }, "Subscription cancellation initiated."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ex.Message);
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
         }
 
