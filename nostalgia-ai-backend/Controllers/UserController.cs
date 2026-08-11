@@ -20,6 +20,13 @@ namespace nostalgia_ai_backend.Controllers
             _userRepository = userRepository;
         }
 
+        // --- Custom ALB Health Check Endpoint ---
+        [HttpGet("health")]
+        public IActionResult HealthCheck()
+        {
+            return Ok(new { status = "Healthy", timestamp = DateTime.UtcNow });
+        }
+
         [HttpPost("socialLoginValidate")]
         public async Task<ActionResult<string>> ValidateSocialAuthentication(LoginToken token, String provider)
         {

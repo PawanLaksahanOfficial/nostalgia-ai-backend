@@ -2,6 +2,8 @@
 {
     public interface IAIService
     {
-        Task<string> GenerateNostalgicTextAsync(string prompt);
+        Task<string> GenerateNostalgicTextAsync(
+            string prompt,
+            CancellationToken cancellationToken = default);
     }
 }

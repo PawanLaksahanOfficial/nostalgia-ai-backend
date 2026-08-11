@@ -30,13 +30,28 @@ namespace Infrastructure.Services
                 {
                     await ProcessPendingJobsAsync(stoppingToken);
                 }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    // Host shutdown requested during job processing
+                    break;
+                }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error occurred while processing video jobs.");
+                    _logger.LogError(ex, "Unhandled error occurred while processing video jobs.");
                 }
 
-                await Task.Delay(_pollingInterval, stoppingToken);
+                try
+                {
+                    await Task.Delay(_pollingInterval, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected when host stops during polling delay
+                    break;
+                }
             }
+
+            _logger.LogInformation("Video Processing Worker stopped.");
         }
 
         private async Task ProcessPendingJobsAsync(CancellationToken cancellationToken)
@@ -46,55 +61,69 @@ namespace Infrastructure.Services
             var aiService = scope.ServiceProvider.GetRequiredService<IAIService>();
             var fileStorage = scope.ServiceProvider.GetRequiredService<IFileStorage>();
 
+            // Fix 1: Add OrderBy to ensure deterministic polling order
             var pendingJobs = await dbContext.UserMemories
                 .Where(m => m.Status == VideoStatus.Pending)
+                .OrderBy(m => m.CreatedAt) // Or m.Id
                 .Take(5)
                 .ToListAsync(cancellationToken);
 
+            if (!pendingJobs.Any())
+                return;
+
+            // Fix 3: Claim batch immediately to prevent duplicate processing
             foreach (var job in pendingJobs)
             {
+                job.Status = VideoStatus.Processing;
+            }
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            foreach (var job in pendingJobs)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
                 try
                 {
                     await ProcessJobAsync(job, dbContext, aiService, fileStorage, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // Re-throw to exit worker loop cleanly without failing job status permanently
+                    throw;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to process job {JobId}", job.Id);
                     job.Status = VideoStatus.Failed;
-                    await dbContext.SaveChangesAsync(cancellationToken);
+
+                    // Ensured save on failure even if cancellation was requested mid-execution
+                    await dbContext.SaveChangesAsync(CancellationToken.None);
                 }
             }
         }
 
         private async Task ProcessJobAsync(
-            UserMemory job, 
-            EFDbContext dbContext, 
-            IAIService aiService, 
+            UserMemory job,
+            EFDbContext dbContext,
+            IAIService aiService,
             IFileStorage fileStorage,
             CancellationToken cancellationToken)
         {
             _logger.LogInformation("Processing job {JobId}: {Title}", job.Id, job.Title);
-            job.Status = VideoStatus.Processing;
-            await dbContext.SaveChangesAsync(cancellationToken);
 
-            // Step 1: Generate nostalgic narrative from user's story text
-            var narrative = await aiService.GenerateNostalgicTextAsync(job.StoryText);
+            // Step 1: Generate narrative passing cancellation token
+            var narrative = await aiService.GenerateNostalgicTextAsync(job.StoryText, cancellationToken);
             job.GeneratedNarrative = narrative;
 
-            // Step 2: Generate music (placeholder - will be wired up in Phase 1)
-            // Will use MusicGen or Hugging Face API in Phase 1
+            // Step 2: Music generation (Phase 1)
+            // Step 3: Voiceover generation (Phase 1)
+            // Step 4: Video assembly (Phase 1)
 
-            // Step 3: Generate voiceover (placeholder - will be wired up in Phase 1)
-            // Will use Edge-TTS in Phase 1
-
-            // Step 4: Assemble video (placeholder - will be wired up in Phase 1)
-            // Will use FFmpeg in Phase 1
-
-            // Mark as completed
             job.Status = VideoStatus.Completed;
             job.CompletedAt = DateTime.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
 
+            await dbContext.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Job {JobId} completed successfully.", job.Id);
         }
     }

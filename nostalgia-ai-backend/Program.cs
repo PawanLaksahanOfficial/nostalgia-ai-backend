@@ -1,5 +1,5 @@
-using System.Text;
 using Application.Interfaces;
+using Google;
 using Infrastructure.AI;
 using Infrastructure.Data;
 using Infrastructure.Repositories;
@@ -7,18 +7,44 @@ using Infrastructure.Services;
 using Infrastructure.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// CORS Policy
+if (builder.Environment.IsProduction())
+{
+    builder.Configuration.AddSystemsManager(
+        path: "/nostalgia/production",
+        optional: false,
+        reloadAfter: TimeSpan.FromMinutes(30)
+    );
+}
+
+// CORS Policy - origins are read from configuration (appsettings.json / appsettings.Production.json)
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowFrontend", p => p
-        .WithOrigins("http://localhost:3000", "http://localhost:5173")
-        .AllowAnyMethod()
-        .AllowAnyHeader()
-        .AllowCredentials());
+    options.AddPolicy("AllowFrontend", p =>
+    {
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+            ?? Array.Empty<string>();
+
+        if (allowedOrigins.Length > 0)
+        {
+            p.WithOrigins(allowedOrigins)
+             .AllowAnyMethod()
+             .AllowAnyHeader()
+             .AllowCredentials();
+        }
+        else
+        {
+            // Same-origin deployment behind an ALB/nginx reverse proxy: allow any origin. No credentials header needed.
+            p.AllowAnyOrigin()
+             .AllowAnyMethod()
+             .AllowAnyHeader();
+        }
+    });
 });
 
 builder.Services.AddControllers();
@@ -77,20 +103,51 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
+    app.UseHttpsRedirection();
 }
-app.UseHttpsRedirection();
 
-// Serve static files from storage directory
+// Ensure custom local storage directory exists and serve files from /storage route
 var storagePath = Path.Combine(Directory.GetCurrentDirectory(), "storage");
 if (!Directory.Exists(storagePath))
 {
     Directory.CreateDirectory(storagePath);
 }
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(storagePath),
+    RequestPath = "/storage"
+});
+
+// 1. Look for index.html when hitting root "/"
+app.UseDefaultFiles();
+
+// 2. Serve static React files (JS, CSS, static assets) from wwwroot
 app.UseStaticFiles();
 
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
+
+// 3. Fallback route to serve React's index.html for client-side React Router navigation
+app.MapFallbackToFile("index.html");
+
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        var dbContext = services.GetRequiredService<EFDbContext>();
+        dbContext.Database.Migrate();
+        Console.WriteLine("--> Database migration completed successfully!");
+    }
+    catch (Exception ex)
+    {
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "An error occurred while migrating the database.");
+        throw;
+    }
+}
 
 app.Run();
