@@ -15,6 +15,7 @@ WORKDIR /app
 COPY --from=build /app .
 
 ENV ASPNETCORE_ENVIRONMENT=Production
+ENV DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false
 EXPOSE 8080
 
 CMD ASPNETCORE_URLS=http://+:${PORT:-8080} dotnet nostalgia-ai-backend.dll
