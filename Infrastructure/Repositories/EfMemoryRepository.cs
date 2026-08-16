@@ -21,6 +21,12 @@ namespace Infrastructure.Repositories
                 .FirstOrDefaultAsync(m => m.Id == id);
         }
 
+        public async Task<UserMemory?> GetByIdForUserAsync(int id, int userId)
+        {
+            return await _dbContext.UserMemories
+                .FirstOrDefaultAsync(m => m.Id == id && m.UserId == userId);
+        }
+
         public async Task<IEnumerable<UserMemory>> GetByUserIdAsync(int userId)
         {
             return await _dbContext.UserMemories

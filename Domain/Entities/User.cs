@@ -17,7 +17,11 @@ namespace Domain.Entities
         public bool Active { get; set; }
         public bool Deleted { get; set; }
         public UserTier Tier { get; set; } = UserTier.Free;
-
+        public string? StripeCustomerId { get; set; }
+        public string? StripeSubscriptionId { get; set; }
+        public DateTime? SubscriptionEndDate { get; set; }
+        public int MonthlyMemoryCount { get; set; }
+        public DateTime? MonthlyCountResetDate { get; set; }
         public ICollection<UserMemory> Memories { get; set; } = new List<UserMemory>();
     }
 }

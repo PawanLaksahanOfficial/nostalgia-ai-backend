@@ -19,8 +19,7 @@ namespace Infrastructure.AI
         public async Task<string> GenerateNostalgicTextAsync(string prompt)
         {
             var url = _configuration.GetSection("OpenRouter")["Url"];
-            var apiKey = _configuration.GetSection("OpenRouter")["ApiToken"];
-            
+            var apiKey = _configuration.GetSection("OpenRouter")["ApiToken"]; 
             var requestBody = new
             {
                 model = "nvidia/nemotron-nano-12b-v2-vl:free",
