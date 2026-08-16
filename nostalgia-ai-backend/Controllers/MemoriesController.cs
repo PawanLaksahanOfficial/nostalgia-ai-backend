@@ -13,14 +13,23 @@ namespace nostalgia_ai_backend.Controllers
     {
         private readonly IAIService _aIService;
         private readonly IMemoryRepository _memoryRepository;
+        private readonly ISubscriptionService _subscriptionService;
+        private readonly ILogger<MemoriesController> _logger;
 
-        public MemoriesController(IAIService aIService, IMemoryRepository memoryRepository)
+        public MemoriesController(
+            IAIService aIService,
+            IMemoryRepository memoryRepository,
+            ISubscriptionService subscriptionService,
+            ILogger<MemoriesController> logger)
         {
             _aIService = aIService;
             _memoryRepository = memoryRepository;
+            _subscriptionService = subscriptionService;
+            _logger = logger;
         }
 
         [HttpPost("generate")]
+        [Authorize]
         public async Task<ActionResult<ApiResponse<string>>> GenerateNostalgicFeeling([FromBody] string userPrompt)
         {
             try
@@ -30,7 +39,8 @@ namespace nostalgia_ai_backend.Controllers
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<string>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in GenerateNostalgicFeeling.");
+                return BadRequest(ApiResponse<string>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -44,6 +54,12 @@ namespace nostalgia_ai_backend.Controllers
                 if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
                 {
                     return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
+                }
+
+                var quota = await _subscriptionService.GetUsageQuotaAsync(userId);
+                if (quota.MonthlyMemoriesUsed >= quota.MonthlyMemoriesLimit)
+                {
+                    return StatusCode(403, ApiResponse<object>.Fail("Monthly memory limit reached. Upgrade to Premium for a higher limit."));
                 }
 
                 var memory = new UserMemory
@@ -64,11 +80,14 @@ namespace nostalgia_ai_backend.Controllers
                     return BadRequest(ApiResponse<object>.Fail("Failed to create memory."));
                 }
 
+                await _subscriptionService.IncrementMonthlyUsageAsync(userId);
+
                 return Ok(ApiResponse<object>.Ok(new { jobId = id, status = "pending" }, "Memory creation queued."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in CreateMemoryVideo.");
+                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -78,7 +97,13 @@ namespace nostalgia_ai_backend.Controllers
         {
             try
             {
-                var memory = await _memoryRepository.GetByIdAsync(id);
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+                {
+                    return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
+                }
+
+                var memory = await _memoryRepository.GetByIdForUserAsync(id, userId);
                 if (memory == null)
                 {
                     return NotFound(ApiResponse<object>.NotFound("Memory not found."));
@@ -99,7 +124,8 @@ namespace nostalgia_ai_backend.Controllers
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in GetMemoryStatus.");
+                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -130,7 +156,8 @@ namespace nostalgia_ai_backend.Controllers
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in GetMyMemories.");
+                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
             }
         }
     }

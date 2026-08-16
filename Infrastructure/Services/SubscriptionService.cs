@@ -4,6 +4,7 @@ using Domain.Entities;
 using Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Stripe;
 using Stripe.Checkout;
 
@@ -13,11 +14,13 @@ namespace Infrastructure.Services
     {
         private readonly EFDbContext _dbContext;
         private readonly IConfiguration _configuration;
+        private readonly ILogger<SubscriptionService> _logger;
 
-        public SubscriptionService(EFDbContext dbContext, IConfiguration configuration)
+        public SubscriptionService(EFDbContext dbContext, IConfiguration configuration, ILogger<SubscriptionService> logger)
         {
             _dbContext = dbContext;
             _configuration = configuration;
+            _logger = logger;
 
             var stripeKey = _configuration["Stripe:SecretKey"];
             if (!string.IsNullOrEmpty(stripeKey))
@@ -85,6 +88,18 @@ namespace Infrastructure.Services
             {
                 throw new UnauthorizedAccessException("User not found.");
             }
+
+            var allowedPriceId = _configuration["Stripe:PremiumPriceId"];
+            if (string.IsNullOrEmpty(allowedPriceId) || priceId != allowedPriceId)
+            {
+                throw new InvalidOperationException("Invalid price selection.");
+            }
+
+            if (!IsAllowedRedirectUrl(successUrl) || !IsAllowedRedirectUrl(cancelUrl))
+            {
+                throw new InvalidOperationException("Invalid redirect URL.");
+            }
+
             // Create Stripe Customer if the user doesn't have one yet
             if (string.IsNullOrEmpty(user.StripeCustomerId))
             {
@@ -130,7 +145,62 @@ namespace Infrastructure.Services
             };
         }
 
-        public async Task HandleSubscriptionCreatedAsync(string stripeCustomerId, string stripeSubscriptionId)
+        public async Task CancelSubscriptionAsync(int userId)
+        {
+            var user = await _dbContext.Users
+                .FirstOrDefaultAsync(u => u.UserId == userId && !u.Deleted);
+            if (user == null)
+            {
+                throw new UnauthorizedAccessException("User not found.");
+            }
+            if (string.IsNullOrEmpty(user.StripeSubscriptionId))
+            {
+                throw new InvalidOperationException("No active subscription to cancel.");
+            }
+
+            var subscriptionService = new Stripe.SubscriptionService();
+            await subscriptionService.UpdateAsync(user.StripeSubscriptionId, new SubscriptionUpdateOptions
+            {
+                CancelAtPeriodEnd = true
+            });
+        }
+
+        public async Task<bool> TryMarkEventProcessedAsync(string eventId)
+        {
+            if (await _dbContext.ProcessedStripeEvents.AnyAsync(e => e.EventId == eventId))
+            {
+                return false;
+            }
+
+            _dbContext.ProcessedStripeEvents.Add(new ProcessedStripeEvent { EventId = eventId, ProcessedAt = DateTime.UtcNow });
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+                return true;
+            }
+            catch (DbUpdateException)
+            {
+                return false;
+            }
+        }
+
+        private bool IsAllowedRedirectUrl(string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return false;
+            }
+
+            var allowedOrigins = (_configuration["AllowedOrigins"] ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            return allowedOrigins.Any(origin =>
+                Uri.TryCreate(origin, UriKind.Absolute, out var originUri) &&
+                originUri.Host.Equals(uri.Host, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public async Task HandleSubscriptionCreatedAsync(string stripeCustomerId, string stripeSubscriptionId, DateTime? currentPeriodEnd)
         {
             var user = await _dbContext.Users
                 .FirstOrDefaultAsync(u => u.StripeCustomerId == stripeCustomerId && !u.Deleted);
@@ -138,7 +208,7 @@ namespace Infrastructure.Services
 
             user.StripeSubscriptionId = stripeSubscriptionId;
             user.Tier = UserTier.Premium;
-            user.SubscriptionEndDate = DateTime.UtcNow.AddMonths(1);
+            user.SubscriptionEndDate = currentPeriodEnd ?? DateTime.UtcNow.AddMonths(1);
             user.MonthlyMemoryCount = 0;
             await _dbContext.SaveChangesAsync();
         }
@@ -166,7 +236,7 @@ namespace Infrastructure.Services
             var userIdStr = session.Metadata?.GetValueOrDefault("userId");
             if (string.IsNullOrEmpty(userIdStr) || !int.TryParse(userIdStr, out var userId)) return;
 
-            var user = await _dbContext.Users.FindAsync(userId);
+            var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.UserId == userId && !u.Deleted);
             if (user == null) return;
 
             // Save the Stripe Customer ID on the user record
@@ -174,7 +244,7 @@ namespace Infrastructure.Services
             await _dbContext.SaveChangesAsync();
         }
 
-        public async Task HandleSubscriptionUpdatedAsync(string subscriptionId, string status)
+        public async Task HandleSubscriptionUpdatedAsync(string subscriptionId, string status, DateTime? currentPeriodEnd)
         {
             var user = await _dbContext.Users
                 .FirstOrDefaultAsync(u => u.StripeSubscriptionId == subscriptionId && !u.Deleted);
@@ -183,7 +253,7 @@ namespace Infrastructure.Services
             if (status == "active" || status == "trialing")
             {
                 user.Tier = UserTier.Premium;
-                user.SubscriptionEndDate = DateTime.UtcNow.AddMonths(1);
+                user.SubscriptionEndDate = currentPeriodEnd ?? DateTime.UtcNow.AddMonths(1);
             }
             else if (status == "canceled" || status == "unpaid")
             {

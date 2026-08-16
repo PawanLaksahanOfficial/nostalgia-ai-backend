@@ -12,10 +12,12 @@ namespace nostalgia_ai_backend.Controllers
     public class SubscriptionController : ControllerBase
     {
         private readonly ISubscriptionService _subscriptionService;
+        private readonly ILogger<SubscriptionController> _logger;
 
-        public SubscriptionController(ISubscriptionService subscriptionService)
+        public SubscriptionController(ISubscriptionService subscriptionService, ILogger<SubscriptionController> logger)
         {
             _subscriptionService = subscriptionService;
+            _logger = logger;
         }
 
         [HttpGet("quota")]
@@ -33,7 +35,8 @@ namespace nostalgia_ai_backend.Controllers
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<UsageQuota>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in GetQuota.");
+                return BadRequest(ApiResponse<UsageQuota>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -56,9 +59,14 @@ namespace nostalgia_ai_backend.Controllers
             {
                 return NotFound(ApiResponse<CheckoutSessionResponse>.NotFound("User not found."));
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
             {
                 return BadRequest(ApiResponse<CheckoutSessionResponse>.Fail(ex.Message));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error in CreateCheckoutSession.");
+                return BadRequest(ApiResponse<CheckoutSessionResponse>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -67,12 +75,22 @@ namespace nostalgia_ai_backend.Controllers
         {
             try
             {
-                // Later call Stripe to cancel the subscription
-                return Ok(ApiResponse<object>.Ok(new { }, "Subscription cancellation initiated."));
+                var userId = GetUserId();
+                await _subscriptionService.CancelSubscriptionAsync(userId);
+                return Ok(ApiResponse<object>.Ok(new { }, "Your subscription will remain active until the end of the current billing period, then it will not renew."));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return NotFound(ApiResponse<object>.NotFound("User not found."));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ApiResponse<object>.Fail(ex.Message));
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in CancelSubscription.");
+                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 

@@ -16,17 +16,20 @@ namespace nostalgia_ai_backend.Controllers
         private readonly ISubscriptionService _subscriptionService;
         private readonly IMemoryRepository _memoryRepository;
         private readonly IPasswordHasher _passwordHasher;
+        private readonly ILogger<ProfileController> _logger;
 
         public ProfileController(
             IUserRepository userRepository,
             ISubscriptionService subscriptionService,
             IMemoryRepository memoryRepository,
-            IPasswordHasher passwordHasher)
+            IPasswordHasher passwordHasher,
+            ILogger<ProfileController> logger)
         {
             _userRepository = userRepository;
             _subscriptionService = subscriptionService;
             _memoryRepository = memoryRepository;
             _passwordHasher = passwordHasher;
+            _logger = logger;
         }
 
         [HttpGet("myProfile")]
@@ -54,9 +57,14 @@ namespace nostalgia_ai_backend.Controllers
 
                 return Ok(ApiResponse<object>.Ok(profile));
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
+            }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in GetMyProfile.");
+                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -65,6 +73,13 @@ namespace nostalgia_ai_backend.Controllers
         {
             try
             {
+                if (!string.IsNullOrEmpty(request.AvatarUrl) &&
+                    (!Uri.TryCreate(request.AvatarUrl, UriKind.Absolute, out var avatarUri) ||
+                     (avatarUri.Scheme != Uri.UriSchemeHttp && avatarUri.Scheme != Uri.UriSchemeHttps)))
+                {
+                    return BadRequest(ApiResponse<object>.Fail("Avatar URL must be a valid http(s) URL."));
+                }
+
                 var userId = GetUserId();
                 var result = await _userRepository.UpdateProfileAsync(userId, request);
                 if (!result)
@@ -74,9 +89,14 @@ namespace nostalgia_ai_backend.Controllers
 
                 return Ok(ApiResponse<object>.Ok(new { }, "Profile updated successfully."));
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
+            }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in UpdateProfile.");
+                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -106,9 +126,14 @@ namespace nostalgia_ai_backend.Controllers
 
                 return Ok(ApiResponse<object>.Ok(new { }, "Password changed successfully."));
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
+            }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in ChangePassword.");
+                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -132,9 +157,14 @@ namespace nostalgia_ai_backend.Controllers
 
                 return Ok(ApiResponse<object>.Ok(result));
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
+            }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in GetMyMemories.");
+                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 

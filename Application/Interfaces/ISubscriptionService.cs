@@ -8,11 +8,13 @@ namespace Application.Interfaces
         Task IncrementMonthlyUsageAsync(int userId);
         Task ResetMonthlyUsageAsync(int userId);
         Task<CheckoutSessionResponse> CreateCheckoutSessionAsync(int userId, string priceId, string successUrl, string cancelUrl);
-        Task HandleSubscriptionCreatedAsync(string stripeCustomerId, string stripeSubscriptionId);
+        Task CancelSubscriptionAsync(int userId);
+        Task HandleSubscriptionCreatedAsync(string stripeCustomerId, string stripeSubscriptionId, DateTime? currentPeriodEnd);
         Task HandleSubscriptionDeletedAsync(string stripeSubscriptionId);
         Task HandleCheckoutSessionCompletedAsync(string sessionId);
-        Task HandleSubscriptionUpdatedAsync(string subscriptionId, string status);
+        Task HandleSubscriptionUpdatedAsync(string subscriptionId, string status, DateTime? currentPeriodEnd);
         Task HandlePaymentSucceededAsync(string customerId);
         Task HandlePaymentFailedAsync(string customerId);
+        Task<bool> TryMarkEventProcessedAsync(string eventId);
     }
 }

@@ -17,14 +17,16 @@ namespace Infrastructure.Repositories
 
         public async Task<User?> GetUserByEmailAsync(string email)
         {
+            var normalizedEmail = email.Trim().ToLowerInvariant();
             return await _dbContext.Users
-                .FirstOrDefaultAsync(x => x.Email == email && x.Active && !x.Deleted);
+                .FirstOrDefaultAsync(x => x.Email == normalizedEmail && x.Active && !x.Deleted);
         }
 
         public async Task<User?> GetUserByEmailIncludingDeletedAsync(string email)
         {
+            var normalizedEmail = email.Trim().ToLowerInvariant();
             return await _dbContext.Users
-                .FirstOrDefaultAsync(x => x.Email == email);
+                .FirstOrDefaultAsync(x => x.Email == normalizedEmail);
         }
 
         public async Task<User?> GetByIdAsync(int userId)
@@ -47,7 +49,7 @@ namespace Infrastructure.Repositories
             {
                 FirstName = request.FirstName,
                 LastName = request.LastName,
-                Email = request.Email,
+                Email = request.Email.Trim().ToLowerInvariant(),
                 PasswordHash = passwordHash,
                 CreatedDate = DateTime.UtcNow,
                 LastUpdatedDate = DateTime.UtcNow,
@@ -95,12 +97,15 @@ namespace Infrastructure.Repositories
 
         public async Task<PasswordResetToken?> ValidatePasswordResetTokenAsync(string email, string token)
         {
+            var normalizedEmail = email.Trim().ToLowerInvariant();
             return await _dbContext.PasswordResetTokens
                 .Include(prt => prt.User)
                 .FirstOrDefaultAsync(prt =>
-                    prt.User.Email == email &&
+                    prt.User.Email == normalizedEmail &&
                     prt.Token == token &&
                     !prt.Used &&
+                    prt.User.Active &&
+                    !prt.User.Deleted &&
                     prt.ExpiresAt > DateTime.UtcNow);
         }
 
@@ -141,7 +146,7 @@ namespace Infrastructure.Repositories
             {
                 FirstName = model.FirstName,
                 LastName = model.LastName,
-                Email = model.Email,
+                Email = model.Email.Trim().ToLowerInvariant(),
                 CreatedDate = DateTime.UtcNow,
                 LastUpdatedDate = DateTime.UtcNow,
                 LastSignInDate = DateTime.UtcNow,
@@ -154,6 +159,18 @@ namespace Infrastructure.Repositories
             _dbContext.Users.Add(user);
             var rowsAffected = await _dbContext.SaveChangesAsync();
             return rowsAffected > 0 ? user : null;
+        }
+
+        public async Task<User?> ReactivateSocialLoginUserAsync(User existingUser, UserModel model)
+        {
+            existingUser.FirstName = model.FirstName;
+            existingUser.LastName = model.LastName;
+            existingUser.Deleted = false;
+            existingUser.Active = true;
+            existingUser.LastUpdatedDate = DateTime.UtcNow;
+            existingUser.LastSignInDate = DateTime.UtcNow;
+            var rowsAffected = await _dbContext.SaveChangesAsync();
+            return rowsAffected > 0 ? existingUser : null;
         }
     }
 }

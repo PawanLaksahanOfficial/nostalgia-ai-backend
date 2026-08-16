@@ -1,5 +1,6 @@
 ﻿using Application.DTOs;
 using Application.Interfaces;
+using Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
 
 namespace nostalgia_ai_backend.Controllers
@@ -10,11 +11,13 @@ namespace nostalgia_ai_backend.Controllers
     {
         private readonly IAuthenticationService _authenticationService;
         private readonly IUserRepository _userRepository;
+        private readonly ILogger<UserController> _logger;
 
-        public UserController(IAuthenticationService authenticationService, IUserRepository userRepository)
+        public UserController(IAuthenticationService authenticationService, IUserRepository userRepository, ILogger<UserController> logger)
         {
             _authenticationService = authenticationService;
             _userRepository = userRepository;
+            _logger = logger;
         }
 
         [HttpPost("socialLoginValidate")]
@@ -66,15 +69,15 @@ namespace nostalgia_ai_backend.Controllers
                     return Unauthorized(ApiResponse<string>.Fail("Invalid social authentication token."));
                 }
                 var jwtToken = string.Empty;
-                var user = await _userRepository.GetUserByEmailAsync(socialProfile.Email);
-                if (user != null)
+                var existingUser = await _userRepository.GetUserByEmailIncludingDeletedAsync(socialProfile.Email);
+                if (existingUser != null && !existingUser.Deleted)
                 {
-                    var status = await _userRepository.UpdateUserLoginStatusAsync(user);
+                    var status = await _userRepository.UpdateUserLoginStatusAsync(existingUser);
                     if (!status)
                     {
                         return BadRequest(ApiResponse<string>.Fail("Failed to update login status."));
                     }
-                    jwtToken = _authenticationService.GenerateJwtToken(user.UserId);
+                    jwtToken = _authenticationService.GenerateJwtToken(existingUser.UserId);
                 }
                 else
                 {
@@ -85,20 +88,30 @@ namespace nostalgia_ai_backend.Controllers
                         Email = socialProfile.Email
                     };
 
-                    var newUser = await _userRepository.CreateSocialLoginUserAsync(userModel);
-                    if (newUser == null)
+                    User? user;
+                    if (existingUser != null && existingUser.Deleted)
+                    {
+                        user = await _userRepository.ReactivateSocialLoginUserAsync(existingUser, userModel);
+                    }
+                    else
+                    {
+                        user = await _userRepository.CreateSocialLoginUserAsync(userModel);
+                    }
+
+                    if (user == null)
                     {
                         return BadRequest(ApiResponse<string>.Fail("Failed to create user account."));
                     }
 
-                    jwtToken = _authenticationService.GenerateJwtToken(newUser.UserId);
+                    jwtToken = _authenticationService.GenerateJwtToken(user.UserId);
                 }
 
                 return Ok(ApiResponse<string>.Ok(jwtToken, "Authentication successful."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<string>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in ValidateSocialAuthentication.");
+                return BadRequest(ApiResponse<string>.Fail("An unexpected error occurred. Please try again."));
             }
         }
     }

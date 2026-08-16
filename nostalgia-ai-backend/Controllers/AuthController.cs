@@ -2,6 +2,8 @@ using Application.DTOs;
 using Application.Interfaces;
 using Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace nostalgia_ai_backend.Controllers
 {
@@ -13,17 +15,20 @@ namespace nostalgia_ai_backend.Controllers
         private readonly IUserRepository _userRepository;
         private readonly IAuthenticationService _authenticationService;
         private readonly IEmailService _emailService;
+        private readonly ILogger<AuthController> _logger;
 
         public AuthController(
             IPasswordHasher passwordHasher,
             IUserRepository userRepository,
             IAuthenticationService authenticationService,
-            IEmailService emailService)
+            IEmailService emailService,
+            ILogger<AuthController> logger)
         {
             _passwordHasher = passwordHasher;
             _userRepository = userRepository;
             _authenticationService = authenticationService;
             _emailService = emailService;
+            _logger = logger;
         }
 
         [HttpPost("register")]
@@ -64,9 +69,14 @@ namespace nostalgia_ai_backend.Controllers
                 var authResponse = CreateAuthResponse(newUser);
                 return Ok(ApiResponse<AuthResponse>.Ok(authResponse, "Registration successful."));
             }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                return Conflict(ApiResponse<AuthResponse>.Fail("Email already registered."));
+            }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<AuthResponse>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in Register.");
+                return BadRequest(ApiResponse<AuthResponse>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -97,47 +107,50 @@ namespace nostalgia_ai_backend.Controllers
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<AuthResponse>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in Login.");
+                return BadRequest(ApiResponse<AuthResponse>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
         [HttpPost("forgot-password")]
         public async Task<ActionResult<ApiResponse<object>>> ForgotPassword([FromBody] ForgotPasswordRequest request)
         {
+            const string genericMessage = "If an account exists, a reset email has been sent.";
             try
             {
                 var user = await _userRepository.GetUserByEmailAsync(request.Email);
-                if (user == null || string.IsNullOrEmpty(user.PasswordHash))
+                if (user != null && !string.IsNullOrEmpty(user.PasswordHash))
                 {
-                    // Return success to prevent email enumeration
-                    return Ok(ApiResponse<object>.Ok(new { }, "If an account exists, a reset email has been sent."));
+                    var resetToken = new PasswordResetToken
+                    {
+                        UserId = user.UserId,
+                        Token = Guid.NewGuid().ToString("N"),
+                        ExpiresAt = DateTime.UtcNow.AddHours(1),
+                        Used = false,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    var tokenCreated = await _userRepository.CreatePasswordResetTokenAsync(resetToken);
+                    if (tokenCreated)
+                    {
+                        var emailSent = await _emailService.SendPasswordResetEmailAsync(user.Email, resetToken.Token, $"{user.FirstName} {user.LastName}");
+                        if (!emailSent)
+                        {
+                            _logger.LogError("Failed to send password reset email for user {UserId}.", user.UserId);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogError("Failed to create password reset token for user {UserId}.", user.UserId);
+                    }
                 }
 
-                var resetToken = new PasswordResetToken
-                {
-                    UserId = user.UserId,
-                    Token = Guid.NewGuid().ToString("N"),
-                    ExpiresAt = DateTime.UtcNow.AddHours(1),
-                    Used = false,
-                    CreatedAt = DateTime.UtcNow
-                };
-
-                var tokenCreated = await _userRepository.CreatePasswordResetTokenAsync(resetToken);
-                if (!tokenCreated)
-                {
-                    return BadRequest(ApiResponse<object>.Fail("Failed to generate reset token."));
-                }
-                var emailSent = await _emailService.SendPasswordResetEmailAsync(user.Email, resetToken.Token, $"{user.FirstName} {user.LastName}");
-                if (!emailSent)
-                {
-                    return BadRequest(ApiResponse<object>.Fail("Failed to send reset email. Please try again."));
-                }
-
-                return Ok(ApiResponse<object>.Ok(new { }, "A reset email has been sent."));
+                return Ok(ApiResponse<object>.Ok(new { }, genericMessage));
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in ForgotPassword.");
+                return Ok(ApiResponse<object>.Ok(new { }, genericMessage));
             }
         }
 
@@ -167,7 +180,8 @@ namespace nostalgia_ai_backend.Controllers
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse<object>.Fail(ex.Message));
+                _logger.LogError(ex, "Unexpected error in ResetPassword.");
+                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
             }
         }
 
@@ -189,6 +203,11 @@ namespace nostalgia_ai_backend.Controllers
                     MonthlyMemoriesLimit = isPremium ? 100 : 3
                 }
             };
+        }
+
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+        {
+            return ex.InnerException is PostgresException pgEx && pgEx.SqlState == PostgresErrorCodes.UniqueViolation;
         }
     }
 }
