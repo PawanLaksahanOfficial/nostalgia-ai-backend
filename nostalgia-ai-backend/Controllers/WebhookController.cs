@@ -69,11 +69,6 @@ namespace nostalgia_ai_backend.Controllers
                 _logger.LogWarning(ex, "Stripe webhook signature verification failed.");
                 return BadRequest(ApiResponse.Fail("Invalid webhook signature."));
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unexpected error processing Stripe webhook.");
-                return BadRequest(ApiResponse.Fail("An unexpected error occurred processing the webhook."));
-            }
         }
 
         private async Task HandleCheckoutSessionCompleted(Event stripeEvent)

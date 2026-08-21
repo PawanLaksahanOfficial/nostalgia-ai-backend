@@ -2,6 +2,7 @@ using Application.DTOs;
 using Application.Interfaces;
 using Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -9,6 +10,7 @@ namespace nostalgia_ai_backend.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [EnableRateLimiting("auth")]
     public class AuthController : ControllerBase
     {
         private readonly IPasswordHasher _passwordHasher;
@@ -73,43 +75,30 @@ namespace nostalgia_ai_backend.Controllers
             {
                 return Conflict(ApiResponse<AuthResponse>.Fail("Email already registered."));
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unexpected error in Register.");
-                return BadRequest(ApiResponse<AuthResponse>.Fail("An unexpected error occurred. Please try again."));
-            }
         }
 
         [HttpPost("login")]
         public async Task<ActionResult<ApiResponse<AuthResponse>>> Login([FromBody] LoginRequest request)
         {
-            try
+            var user = await _userRepository.GetUserByEmailAsync(request.Email);
+            if (user == null || string.IsNullOrEmpty(user.PasswordHash))
             {
-                var user = await _userRepository.GetUserByEmailAsync(request.Email);
-                if (user == null || string.IsNullOrEmpty(user.PasswordHash))
-                {
-                    return Unauthorized(ApiResponse<AuthResponse>.Fail("Invalid email or password."));
-                }
-
-                if (!_passwordHasher.Verify(request.Password, user.PasswordHash))
-                {
-                    return Unauthorized(ApiResponse<AuthResponse>.Fail("Invalid email or password."));
-                }
-
-                var loginUpdated = await _userRepository.UpdateUserLoginStatusAsync(user);
-                if (!loginUpdated)
-                {
-                    return BadRequest(ApiResponse<AuthResponse>.Fail("Failed to update login status."));
-                }
-
-                var response = CreateAuthResponse(user);
-                return Ok(ApiResponse<AuthResponse>.Ok(response, "Login successful."));
+                return Unauthorized(ApiResponse<AuthResponse>.Fail("Invalid email or password."));
             }
-            catch (Exception ex)
+
+            if (!_passwordHasher.Verify(request.Password, user.PasswordHash))
             {
-                _logger.LogError(ex, "Unexpected error in Login.");
-                return BadRequest(ApiResponse<AuthResponse>.Fail("An unexpected error occurred. Please try again."));
+                return Unauthorized(ApiResponse<AuthResponse>.Fail("Invalid email or password."));
             }
+
+            var loginUpdated = await _userRepository.UpdateUserLoginStatusAsync(user);
+            if (!loginUpdated)
+            {
+                return BadRequest(ApiResponse<AuthResponse>.Fail("Failed to update login status."));
+            }
+
+            var response = CreateAuthResponse(user);
+            return Ok(ApiResponse<AuthResponse>.Ok(response, "Login successful."));
         }
 
         [HttpPost("forgot-password")]
@@ -157,32 +146,24 @@ namespace nostalgia_ai_backend.Controllers
         [HttpPost("reset-password")]
         public async Task<ActionResult<ApiResponse<object>>> ResetPassword([FromBody] ResetPasswordRequest request)
         {
-            try
+            var resetToken = await _userRepository.ValidatePasswordResetTokenAsync(request.Email, request.Token);
+            if (resetToken == null)
             {
-                var resetToken = await _userRepository.ValidatePasswordResetTokenAsync(request.Email, request.Token);
-                if (resetToken == null)
-                {
-                    return BadRequest(ApiResponse<object>.Fail("Invalid or expired reset token."));
-                }
-                var passwordHash = _passwordHasher.Hash(request.NewPassword);
-                var passwordUpdated = await _userRepository.UpdatePasswordAsync(resetToken.UserId, passwordHash);
-                if (!passwordUpdated)
-                {
-                    return BadRequest(ApiResponse<object>.Fail("Failed to update password."));
-                }
-                var tokenMarked = await _userRepository.MarkResetTokenAsUsedAsync(resetToken.Id);
-                if (!tokenMarked)
-                {
-                    return BadRequest(ApiResponse<object>.Fail("Failed to mark token as used."));
-                }
+                return BadRequest(ApiResponse<object>.Fail("Invalid or expired reset token."));
+            }
+            var passwordHash = _passwordHasher.Hash(request.NewPassword);
+            var passwordUpdated = await _userRepository.UpdatePasswordAsync(resetToken.UserId, passwordHash);
+            if (!passwordUpdated)
+            {
+                return BadRequest(ApiResponse<object>.Fail("Failed to update password."));
+            }
+            var tokenMarked = await _userRepository.MarkResetTokenAsUsedAsync(resetToken.Id);
+            if (!tokenMarked)
+            {
+                return BadRequest(ApiResponse<object>.Fail("Failed to mark token as used."));
+            }
 
-                return Ok(ApiResponse<object>.Ok(new { }, "Password reset successful."));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unexpected error in ResetPassword.");
-                return BadRequest(ApiResponse<object>.Fail("An unexpected error occurred. Please try again."));
-            }
+            return Ok(ApiResponse<object>.Ok(new { }, "Password reset successful."));
         }
 
         private AuthResponse CreateAuthResponse(User user)
