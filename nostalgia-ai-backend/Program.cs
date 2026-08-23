@@ -1,5 +1,10 @@
+using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
+using Application.DTOs;
 using Application.Interfaces;
+using Application.Validators;
+using FluentValidation;
 using Infrastructure.AI;
 using Infrastructure.Data;
 using Infrastructure.Repositories;
@@ -7,8 +12,11 @@ using Infrastructure.Services;
 using Infrastructure.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using nostalgia_ai_backend.Filters;
+using nostalgia_ai_backend.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,9 +33,70 @@ builder.Services.AddCors(options =>
         .AllowCredentials());
 });
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<ValidationFilter>();
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Centralized exception handling
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>();
+
+// Rate limiting
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            ApiResponse.Fail("Too many requests. Please try again later."),
+            cancellationToken);
+    };
+
+    // Global: 100 requests/minute per client IP, applied to every endpoint.
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: GetClientIp(httpContext),
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
+
+    options.AddPolicy("auth", httpContext =>
+        RateLimitPartition.GetSlidingWindowLimiter(
+            partitionKey: GetClientIp(httpContext),
+            factory: _ => new SlidingWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                SegmentsPerWindow = 4,
+                QueueLimit = 0
+            }));
+
+    options.AddPolicy("ai-generation", httpContext =>
+        RateLimitPartition.GetTokenBucketLimiter(
+            partitionKey: GetUserOrIp(httpContext),
+            factory: _ => new TokenBucketRateLimiterOptions
+            {
+                TokenLimit = 5,
+                TokensPerPeriod = 2,
+                ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
+});
+
+static string GetClientIp(HttpContext context) =>
+    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+static string GetUserOrIp(HttpContext context) =>
+    context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? GetClientIp(context);
 
 // Database
 builder.Services.AddDbContext<EFDbContext>(options =>
@@ -90,6 +159,7 @@ builder.Services.AddHostedService<VideoProcessingWorker>();
 var app = builder.Build();
 
 // Middleware
+app.UseExceptionHandler();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -108,6 +178,7 @@ app.UseStaticFiles();
 
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
 app.MapGet("/health", () => Results.Ok("Healthy"));
