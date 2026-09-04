@@ -13,6 +13,7 @@ namespace Infrastructure.Data
         public DbSet<UserMemory> UserMemories { get; set; }
         public DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
         public DbSet<ProcessedStripeEvent> ProcessedStripeEvents { get; set; }
+        public DbSet<MemoryShareLink> MemoryShareLinks { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -25,6 +26,17 @@ namespace Infrastructure.Data
                       .HasForeignKey(um => um.UserId)
                       .OnDelete(DeleteBehavior.Cascade);
                 entity.HasIndex(um => um.Status);
+            });
+
+            modelBuilder.Entity<MemoryShareLink>(entity =>
+            {
+                entity.Property(s => s.Token).HasMaxLength(64).IsRequired();
+                entity.HasIndex(s => s.Token).IsUnique();
+                entity.HasIndex(s => s.UserMemoryId);
+                entity.HasOne(s => s.UserMemory)
+                      .WithMany(m => m.ShareLinks)
+                      .HasForeignKey(s => s.UserMemoryId)
+                      .OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<PasswordResetToken>(entity =>

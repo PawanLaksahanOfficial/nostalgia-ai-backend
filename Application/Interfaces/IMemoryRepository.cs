@@ -10,5 +10,8 @@ namespace Application.Interfaces
         Task<int> CreateAsync(UserMemory memory);
         Task<bool> UpdateAsync(UserMemory memory);
         Task<bool> DeleteAsync(int id);
+        Task<IEnumerable<UserMemory>> GetPendingAsync(int max);
+        Task<bool> TryClaimForProcessingAsync(int id);
+        Task<int> RequeueStaleProcessingAsync(TimeSpan olderThan);
     }
 }
