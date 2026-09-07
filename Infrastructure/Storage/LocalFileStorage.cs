@@ -69,7 +69,13 @@ namespace Infrastructure.Storage
         private string GetFullPath(string key)
         {
             var sanitizedKey = key.Replace("..", "").TrimStart('/').TrimStart('\\');
-            return Path.Combine(_storagePath, sanitizedKey);
+            var fullPath = Path.GetFullPath(Path.Combine(_storagePath, sanitizedKey));
+            var storageRoot = Path.GetFullPath(_storagePath);
+            if (!fullPath.StartsWith(storageRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                throw new UnauthorizedAccessException("Invalid storage key.");
+            }
+            return fullPath;
         }
     }
 }

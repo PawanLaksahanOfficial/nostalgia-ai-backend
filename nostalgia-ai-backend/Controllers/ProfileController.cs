@@ -96,12 +96,11 @@ namespace nostalgia_ai_backend.Controllers
         {
             var userId = GetUserId();
             var memories = await _memoryRepository.GetByUserIdAsync(userId);
-
             var result = memories.Select(m => new
             {
                 m.Id,
                 m.Title,
-                m.Status,
+                Status = m.Status.ToString(),
                 m.CreatedAt,
                 m.CompletedAt,
                 HasVideo = !string.IsNullOrEmpty(m.FinalVideoPath)

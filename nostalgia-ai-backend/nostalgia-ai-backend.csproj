@@ -23,4 +23,12 @@
     <ProjectReference Include="..\Infrastructure\Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Music loops and the subtitle/watermark font used by the video pipeline.
+         Carried through dotnet publish, so the Dockerfile needs no extra COPY. -->
+    <Content Include="assets\**\*"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

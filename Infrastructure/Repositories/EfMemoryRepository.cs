@@ -53,10 +53,43 @@ namespace Infrastructure.Repositories
         {
             var memory = await _dbContext.UserMemories.FindAsync(id);
             if (memory == null) return false;
-            
             _dbContext.UserMemories.Remove(memory);
             var rows = await _dbContext.SaveChangesAsync();
             return rows > 0;
+        }
+
+        public async Task<IEnumerable<UserMemory>> GetPendingAsync(int max)
+        {
+            return await _dbContext.UserMemories
+                .AsNoTracking()
+                .Where(m => m.Status == VideoStatus.Pending)
+                .OrderBy(m => m.CreatedAt)
+                .Take(max)
+                .ToListAsync();
+        }
+
+        public async Task<bool> TryClaimForProcessingAsync(int id)
+        {
+            var affected = await _dbContext.UserMemories
+                .Where(m => m.Id == id && m.Status == VideoStatus.Pending)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(m => m.Status, VideoStatus.Processing)
+                    .SetProperty(m => m.ProcessingStartedAt, DateTime.UtcNow)
+                    .SetProperty(m => m.ProcessingStep, "Queued"));
+            return affected > 0;
+        }
+
+        public async Task<int> RequeueStaleProcessingAsync(TimeSpan olderThan)
+        {
+            var cutoff = DateTime.UtcNow - olderThan;
+            return await _dbContext.UserMemories
+                .Where(m => m.Status == VideoStatus.Processing
+                            && m.ProcessingStartedAt != null
+                            && m.ProcessingStartedAt < cutoff)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(m => m.Status, VideoStatus.Pending)
+                    .SetProperty(m => m.ProcessingStartedAt, (DateTime?)null)
+                    .SetProperty(m => m.ProcessingStep, (string?)null));
         }
     }
 }

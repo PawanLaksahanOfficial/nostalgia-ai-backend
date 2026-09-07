@@ -91,6 +91,16 @@ builder.Services.AddRateLimiter(options =>
                 ReplenishmentPeriod = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             }));
+
+    options.AddPolicy("share-view", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: GetClientIp(httpContext),
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
 });
 
 static string GetClientIp(HttpContext context) =>
@@ -158,11 +168,36 @@ builder.Services.AddHttpClient("OpenRouter", client =>
 builder.Services.AddScoped<IAIService, AIService>();
 builder.Services.AddScoped<IUserRepository, EfUserRepository>();
 builder.Services.AddScoped<IMemoryRepository, EfMemoryRepository>();
-builder.Services.AddScoped<IFileStorage, LocalFileStorage>();
 builder.Services.AddScoped<IPasswordHasher, PasswordHasherService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IEmailService, SesEmailService>();
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+
+// Video management and sharing
+builder.Services.AddScoped<IShareLinkRepository, EfShareLinkRepository>();
+builder.Services.AddScoped<IShareLinkService, ShareLinkService>();
+builder.Services.AddScoped<IVideoComposer, FfmpegVideoComposer>();
+builder.Services.AddScoped<IMusicProvider, BundledMusicProvider>();
+
+// Storage: local disk for development, R2 anywhere the filesystem is ephemeral.
+if (string.Equals(builder.Configuration.GetSection("Storage")["Provider"], "r2", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddScoped<IFileStorage, R2FileStorage>();
+}
+else
+{
+    builder.Services.AddScoped<IFileStorage, LocalFileStorage>();
+}
+
+// Voiceover is optional: without a provider, videos still get music and captions.
+if (string.Equals(builder.Configuration.GetSection("Tts")["Provider"], "edge", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddScoped<ITextToSpeech, EdgeTtsService>();
+}
+else
+{
+    builder.Services.AddScoped<ITextToSpeech, NoOpTextToSpeech>();
+}
 
 // Background Worker for Video Processing
 builder.Services.AddHostedService<VideoProcessingWorker>();
@@ -182,19 +217,17 @@ if (trustedProxies.Count > 0)
 }
 app.UseHttpsRedirection();
 
-// Serve static files from storage directory
-var storagePath = Path.Combine(Directory.GetCurrentDirectory(), "storage");
-if (!Directory.Exists(storagePath))
-{
-    Directory.CreateDirectory(storagePath);
-}
-app.UseStaticFiles();
-
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
-app.MapGet("/health", () => Results.Ok("Healthy"));
+
+app.MapGet("/health", async (IVideoComposer composer, ITextToSpeech tts) => Results.Ok(new
+{
+    status = "Healthy",
+    ffmpeg = await composer.IsAvailableAsync(),
+    tts = tts.IsEnabled
+}));
 
 app.Run();

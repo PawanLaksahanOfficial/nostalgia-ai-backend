@@ -39,5 +39,15 @@ namespace Domain.Entities
         public int ViewCount { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? CompletedAt { get; set; }
+        public string? ThumbnailPath { get; set; }
+        public string? CaptionsPath { get; set; }
+        public string? MusicTrackName { get; set; }
+        public double? DurationSeconds { get; set; }
+        public long? FileSizeBytes { get; set; }
+        public string? ContentType { get; set; }
+        public string? ProcessingStep { get; set; }
+        public string? FailureReason { get; set; }
+        public DateTime? ProcessingStartedAt { get; set; }
+        public ICollection<MemoryShareLink> ShareLinks { get; set; } = new List<MemoryShareLink>();
     }
 }
