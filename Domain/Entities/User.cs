@@ -23,5 +23,10 @@ namespace Domain.Entities
         public int MonthlyMemoryCount { get; set; }
         public DateTime? MonthlyCountResetDate { get; set; }
         public ICollection<UserMemory> Memories { get; set; } = new List<UserMemory>();
+        public static readonly TimeSpan EntitlementGracePeriod = TimeSpan.FromDays(3);
+        public bool IsPremiumActive() =>
+            Tier == UserTier.Premium &&
+            (SubscriptionEndDate == null ||
+             SubscriptionEndDate.Value.Add(EntitlementGracePeriod) > DateTime.UtcNow);
     }
 }

@@ -78,4 +78,41 @@ namespace Application.DTOs
         public string SessionUrl { get; set; } = string.Empty;
         public string SessionId { get; set; } = string.Empty;
     }
+
+    public class GenerateRequest
+    {
+        public string Text { get; set; } = string.Empty;
+    }
+
+    public class PlanOption
+    {
+        public string Tier { get; set; } = "free";
+        public string Name { get; set; } = string.Empty;
+        public string? PriceId { get; set; }
+        public long? AmountMinorUnits { get; set; }
+        public string? Currency { get; set; }
+        public string? Interval { get; set; }
+        public int MonthlyMemories { get; set; }
+        public int MaxVideoDurationSeconds { get; set; }
+        public string Quality { get; set; } = "standard";
+        public bool HasWatermark { get; set; }
+    }
+
+    public class SubscriptionStatusResponse
+    {
+        public string Tier { get; set; } = "free";
+        public bool HasActiveSubscription { get; set; }
+        public bool CancelAtPeriodEnd { get; set; }
+        public DateTime? CurrentPeriodEnd { get; set; }
+    }
+
+    public class PortalSessionRequest
+    {
+        public string ReturnUrl { get; set; } = string.Empty;
+    }
+
+    public class PortalSessionResponse
+    {
+        public string PortalUrl { get; set; } = string.Empty;
+    }
 }

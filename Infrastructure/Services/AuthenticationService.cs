@@ -1,5 +1,6 @@
 ﻿using Application.DTOs;
 using Application.Interfaces;
+using Domain.Entities;
 using Google.Apis.Auth;
 using System.Net.Http;
 using Infrastructure.Data;
@@ -41,7 +42,20 @@ namespace Infrastructure.Services
                     {
                         Audience = new List<string> { googleClientIDString.Trim() }
                     };
-                    var payload = await GoogleJsonWebSignature.ValidateAsync(token, settings);
+
+                    GoogleJsonWebSignature.Payload payload;
+                    try
+                    {
+                        payload = await GoogleJsonWebSignature.ValidateAsync(token, settings);
+                    }
+                    catch (InvalidJwtException)
+                    {
+                        return null;
+                    }
+                    if (payload == null || string.IsNullOrEmpty(payload.Email) || !payload.EmailVerified)
+                    {
+                        return null;
+                    }
                     return payload;
                 }
             }
@@ -63,9 +77,19 @@ namespace Infrastructure.Services
                     return null;
                 }
                 var debugContent = await debugResponse.Content.ReadAsStringAsync();
-                using var debugJson = JsonDocument.Parse(debugContent);
-                var data = debugJson.RootElement.GetProperty("data");
-                if (!data.GetProperty("is_valid").GetBoolean() || data.GetProperty("app_id").GetString() != appId)
+                try
+                {
+                    using var debugJson = JsonDocument.Parse(debugContent);
+                    if (!debugJson.RootElement.TryGetProperty("data", out var data) ||
+                        !data.TryGetProperty("is_valid", out var isValid) ||
+                        !isValid.GetBoolean() ||
+                        !data.TryGetProperty("app_id", out var tokenAppId) ||
+                        tokenAppId.GetString() != appId)
+                    {
+                        return null;
+                    }
+                }
+                catch (JsonException)
                 {
                     return null;
                 }
@@ -76,10 +100,24 @@ namespace Infrastructure.Services
                     return null;
                 }
                 var meContent = await meResponse.Content.ReadAsStringAsync();
-                return JsonSerializer.Deserialize<MetaUserDto>(meContent, new JsonSerializerOptions
+
+                MetaUserDto? profile;
+                try
                 {
-                    PropertyNameCaseInsensitive = true
-                });
+                    profile = JsonSerializer.Deserialize<MetaUserDto>(meContent, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    });
+                }
+                catch (JsonException)
+                {
+                    return null;
+                }
+                if (profile == null || string.IsNullOrEmpty(profile.Email))
+                {
+                    return null;
+                }
+                return profile;
             }
             return null;
         }
@@ -106,6 +144,28 @@ namespace Infrastructure.Services
                 return jwtToken;
             }
             return string.Empty;
+        }
+
+        public AuthResponse BuildAuthResponse(User user)
+        {
+            var isPremium = user.IsPremiumActive();
+            return new AuthResponse
+            {
+                Token = GenerateJwtToken(user.UserId),
+                User = new UserDto
+                {
+                    UserId = user.UserId,
+                    FirstName = user.FirstName,
+                    LastName = user.LastName,
+                    Email = user.Email,
+                    AvatarUrl = user.AvatarUrl,
+                    Tier = isPremium ? "premium" : "free",
+                    MonthlyMemoriesUsed = user.MonthlyMemoryCount,
+                    MonthlyMemoriesLimit = isPremium
+                        ? _configuration.GetValue("TierLimits:Premium:MonthlyMemories", 100)
+                        : _configuration.GetValue("TierLimits:Free:MonthlyMemories", 3)
+                }
+            };
         }
     }
 }

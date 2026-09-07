@@ -118,6 +118,25 @@ namespace Infrastructure.Repositories
             return rowsAffected > 0;
         }
 
+        public async Task<bool> ResetPasswordAsync(int userId, string passwordHash)
+        {
+            var user = await _dbContext.Users
+                .FirstOrDefaultAsync(u => u.UserId == userId && !u.Deleted);
+            if (user == null) return false;
+            var outstandingTokens = await _dbContext.PasswordResetTokens
+                .Where(t => t.UserId == userId && !t.Used)
+                .ToListAsync();
+
+            user.PasswordHash = passwordHash;
+            user.LastUpdatedDate = DateTime.UtcNow;
+            foreach (var token in outstandingTokens)
+            {
+                token.Used = true;
+            }
+            await _dbContext.SaveChangesAsync();
+            return true;
+        }
+
         public async Task<bool> UpdateProfileAsync(int userId, UpdateProfileRequest request)
         {
             var user = await _dbContext.Users

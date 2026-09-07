@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -129,18 +130,28 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
+var trustedProxies = (builder.Configuration["TrustedProxies"] ?? string.Empty)
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .Select(candidate => IPAddress.TryParse(candidate, out var parsed) ? parsed : null)
+    .Where(address => address is not null)
+    .ToList();
+
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
+    foreach (var proxy in trustedProxies)
+    {
+        options.KnownProxies.Add(proxy!);
+    }
 });
 
 // HTTP Clients
 builder.Services.AddHttpClient("OpenRouter", client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration.GetSection("OpenRouter")["Url"] ?? "https://openrouter.ai/api/v1");
-    client.Timeout = TimeSpan.FromSeconds(60);
+    client.Timeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("OpenRouter:TimeoutSeconds", 60));
 });
 
 // Dependency Injection for Application Services
@@ -165,7 +176,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-app.UseForwardedHeaders();
+if (trustedProxies.Count > 0)
+{
+    app.UseForwardedHeaders();
+}
 app.UseHttpsRedirection();
 
 // Serve static files from storage directory
