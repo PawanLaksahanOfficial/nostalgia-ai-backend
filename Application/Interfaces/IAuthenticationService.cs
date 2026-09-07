@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Application.DTOs;
+using Domain.Entities;
 using Google.Apis.Auth;
 
 namespace Application.Interfaces
@@ -13,5 +14,6 @@ namespace Application.Interfaces
         Task<GoogleJsonWebSignature.Payload?> ValidateGoogleAuthenticationTokenAsync(string token);
         Task<MetaUserDto?> ValidateMetaAuthenticationTokenAsync(string token);
         string GenerateJwtToken(int userId);
+        AuthResponse BuildAuthResponse(User user);
     }
 }

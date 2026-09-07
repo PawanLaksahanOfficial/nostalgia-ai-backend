@@ -24,6 +24,7 @@ namespace Infrastructure.Data
                       .WithMany(u => u.Memories)
                       .HasForeignKey(um => um.UserId)
                       .OnDelete(DeleteBehavior.Cascade);
+                entity.HasIndex(um => um.Status);
             });
 
             modelBuilder.Entity<PasswordResetToken>(entity =>
@@ -37,6 +38,8 @@ namespace Infrastructure.Data
             modelBuilder.Entity<User>(entity =>
             {
                 entity.HasIndex(u => u.Email).IsUnique();
+                entity.HasIndex(u => u.StripeCustomerId);
+                entity.HasIndex(u => u.StripeSubscriptionId);
             });
 
             modelBuilder.Entity<ProcessedStripeEvent>(entity =>

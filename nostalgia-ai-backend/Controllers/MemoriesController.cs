@@ -1,4 +1,4 @@
-﻿using Application.DTOs;
+using Application.DTOs;
 using Application.Interfaces;
 using Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
@@ -12,6 +12,9 @@ namespace nostalgia_ai_backend.Controllers
     [Route("api/[controller]")]
     public class MemoriesController : ControllerBase
     {
+        private const string QuotaExceededMessage =
+            "Monthly memory limit reached. Upgrade to Premium for a higher limit.";
+
         private readonly IAIService _aIService;
         private readonly IMemoryRepository _memoryRepository;
         private readonly ISubscriptionService _subscriptionService;
@@ -29,10 +32,27 @@ namespace nostalgia_ai_backend.Controllers
         [HttpPost("generate")]
         [Authorize]
         [EnableRateLimiting("ai-generation")]
-        public async Task<ActionResult<ApiResponse<string>>> GenerateNostalgicFeeling([FromBody] string userPrompt)
+        public async Task<ActionResult<ApiResponse<string>>> GenerateNostalgicFeeling([FromBody] GenerateRequest request)
         {
-            var result = await _aIService.GenerateNostalgicTextAsync(userPrompt);
-            return Ok(ApiResponse<string>.Ok(result));
+            if (!TryGetUserId(out var userId))
+            {
+                return Unauthorized(ApiResponse<string>.Fail("Invalid user token."));
+            }
+            if (!await _subscriptionService.TryConsumeQuotaAsync(userId))
+            {
+                return StatusCode(403, ApiResponse<string>.Fail(QuotaExceededMessage));
+            }
+
+            try
+            {
+                var result = await _aIService.GenerateNostalgicTextAsync(request.Text);
+                return Ok(ApiResponse<string>.Ok(result));
+            }
+            catch
+            {
+                await _subscriptionService.RefundQuotaAsync(userId);
+                throw;
+            }
         }
 
         [HttpPost("create")]
@@ -40,47 +60,51 @@ namespace nostalgia_ai_backend.Controllers
         [EnableRateLimiting("ai-generation")]
         public async Task<ActionResult<ApiResponse<object>>> CreateMemoryVideo([FromBody] CreateMemoryRequest request)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            if (!TryGetUserId(out var userId))
             {
                 return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
             }
 
-            var quota = await _subscriptionService.GetUsageQuotaAsync(userId);
-            if (quota.MonthlyMemoriesUsed >= quota.MonthlyMemoriesLimit)
+            if (!await _subscriptionService.TryConsumeQuotaAsync(userId))
             {
-                return StatusCode(403, ApiResponse<object>.Fail("Monthly memory limit reached. Upgrade to Premium for a higher limit."));
+                return StatusCode(403, ApiResponse<object>.Fail(QuotaExceededMessage));
             }
 
-            var memory = new UserMemory
+            try
             {
-                UserId = userId,
-                Title = request.Title,
-                StoryText = request.StoryText,
-                MusicMood = request.MusicMood,
-                Quality = VideoQuality.Standard,
-                Status = VideoStatus.Pending,
-                IsPublic = false,
-                CreatedAt = DateTime.UtcNow
-            };
+                var memory = new UserMemory
+                {
+                    UserId = userId,
+                    Title = request.Title,
+                    StoryText = request.StoryText,
+                    MusicMood = request.MusicMood,
+                    Quality = VideoQuality.Standard,
+                    Status = VideoStatus.Pending,
+                    IsPublic = false,
+                    CreatedAt = DateTime.UtcNow
+                };
 
-            var id = await _memoryRepository.CreateAsync(memory);
-            if (id <= 0)
-            {
-                return BadRequest(ApiResponse<object>.Fail("Failed to create memory."));
+                var id = await _memoryRepository.CreateAsync(memory);
+                if (id <= 0)
+                {
+                    await _subscriptionService.RefundQuotaAsync(userId);
+                    return BadRequest(ApiResponse<object>.Fail("Failed to create memory."));
+                }
+
+                return Ok(ApiResponse<object>.Ok(new { jobId = id, status = "pending" }, "Memory creation queued."));
             }
-
-            await _subscriptionService.IncrementMonthlyUsageAsync(userId);
-
-            return Ok(ApiResponse<object>.Ok(new { jobId = id, status = "pending" }, "Memory creation queued."));
+            catch
+            {
+                await _subscriptionService.RefundQuotaAsync(userId);
+                throw;
+            }
         }
 
         [HttpGet("status/{id}")]
         [Authorize]
         public async Task<ActionResult<ApiResponse<object>>> GetMemoryStatus(int id)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            if (!TryGetUserId(out var userId))
             {
                 return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
             }
@@ -109,8 +133,7 @@ namespace nostalgia_ai_backend.Controllers
         [Authorize]
         public async Task<ActionResult<ApiResponse<object>>> GetMyMemories()
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            if (!TryGetUserId(out var userId))
             {
                 return Unauthorized(ApiResponse<object>.Fail("Invalid user token."));
             }
@@ -127,6 +150,12 @@ namespace nostalgia_ai_backend.Controllers
             });
 
             return Ok(ApiResponse<object>.Ok(result));
+        }
+
+        private bool TryGetUserId(out int userId)
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return int.TryParse(userIdClaim, out userId);
         }
     }
 

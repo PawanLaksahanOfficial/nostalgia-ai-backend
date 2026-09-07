@@ -1,4 +1,5 @@
 using Application.DTOs;
+using Application.Exceptions;
 using Microsoft.AspNetCore.Diagnostics;
 
 namespace nostalgia_ai_backend.Middleware
@@ -17,6 +18,7 @@ namespace nostalgia_ai_backend.Middleware
             var (statusCode, message) = exception switch
             {
                 UnauthorizedAccessException => (StatusCodes.Status401Unauthorized, "Invalid or missing authentication token."),
+                AIServiceException => (StatusCodes.Status503ServiceUnavailable, exception.Message),
                 _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred. Please try again.")
             };
 

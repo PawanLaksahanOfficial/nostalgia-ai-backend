@@ -1,13 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
 namespace Application.DTOs
 {
     public class LoginToken
     {
-        public string TokenId { get; set; }
+        public string TokenId { get; set; } = string.Empty;
+        public string Provider { get; set; } = string.Empty;
     }
 }

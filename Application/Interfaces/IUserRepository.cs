@@ -14,6 +14,7 @@ namespace Application.Interfaces
         Task<bool> CreatePasswordResetTokenAsync(PasswordResetToken resetToken);
         Task<PasswordResetToken?> ValidatePasswordResetTokenAsync(string email, string token);
         Task<bool> MarkResetTokenAsUsedAsync(int tokenId);
+        Task<bool> ResetPasswordAsync(int userId, string passwordHash);
         Task<User?> GetByIdAsync(int userId);
         Task<bool> UpdateProfileAsync(int userId, UpdateProfileRequest request);
         Task<User?> CreateSocialLoginUserAsync(UserModel model);

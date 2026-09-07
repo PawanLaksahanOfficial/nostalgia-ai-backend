@@ -151,40 +151,19 @@ namespace nostalgia_ai_backend.Controllers
             {
                 return BadRequest(ApiResponse<object>.Fail("Invalid or expired reset token."));
             }
+
             var passwordHash = _passwordHasher.Hash(request.NewPassword);
-            var passwordUpdated = await _userRepository.UpdatePasswordAsync(resetToken.UserId, passwordHash);
-            if (!passwordUpdated)
+            var passwordReset = await _userRepository.ResetPasswordAsync(resetToken.UserId, passwordHash);
+            if (!passwordReset)
             {
                 return BadRequest(ApiResponse<object>.Fail("Failed to update password."));
-            }
-            var tokenMarked = await _userRepository.MarkResetTokenAsUsedAsync(resetToken.Id);
-            if (!tokenMarked)
-            {
-                return BadRequest(ApiResponse<object>.Fail("Failed to mark token as used."));
             }
 
             return Ok(ApiResponse<object>.Ok(new { }, "Password reset successful."));
         }
 
-        private AuthResponse CreateAuthResponse(User user)
-        {
-            var isPremium = user.Tier == UserTier.Premium;
-            return new AuthResponse
-            {
-                Token = _authenticationService.GenerateJwtToken(user.UserId),
-                User = new UserDto
-                {
-                    UserId = user.UserId,
-                    FirstName = user.FirstName,
-                    LastName = user.LastName,
-                    Email = user.Email,
-                    AvatarUrl = user.AvatarUrl,
-                    Tier = user.Tier.ToString().ToLower(),
-                    MonthlyMemoriesUsed = user.MonthlyMemoryCount,
-                    MonthlyMemoriesLimit = isPremium ? 100 : 3
-                }
-            };
-        }
+        private AuthResponse CreateAuthResponse(User user) =>
+            _authenticationService.BuildAuthResponse(user);
 
         private static bool IsUniqueConstraintViolation(DbUpdateException ex)
         {
