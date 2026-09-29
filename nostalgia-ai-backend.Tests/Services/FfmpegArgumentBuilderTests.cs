@@ -173,5 +173,31 @@ namespace nostalgia_ai_backend.Tests.Services
             Assert.True(args.IndexOf("-ss") < args.IndexOf("-i"));
             Assert.Contains("thumb.jpg", args);
         }
+
+        [Fact]
+        public void Uses_veryfast_preset_by_default()
+        {
+            var args = FfmpegArgumentBuilder.BuildCompose(Request(), _options).ToList();
+
+            Assert.Equal("veryfast", args[args.IndexOf("-preset") + 1]);
+        }
+
+        [Fact]
+        public void Uses_the_configured_preset()
+        {
+            var options = new VideoEncodingOptions { Preset = "UltraFast" };
+            var args = FfmpegArgumentBuilder.BuildCompose(Request(), options).ToList();
+
+            Assert.Equal("ultrafast", args[args.IndexOf("-preset") + 1]);
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("turbo")]
+        [InlineData("fast -vf evil")]
+        public void Falls_back_to_veryfast_for_unknown_presets(string preset)
+        {
+            Assert.Equal("veryfast", FfmpegArgumentBuilder.ResolvePreset(preset));
+        }
     }
 }

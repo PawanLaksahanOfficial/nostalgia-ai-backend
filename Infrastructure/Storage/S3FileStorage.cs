@@ -7,38 +7,48 @@ using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Storage
 {
-    public class R2FileStorage : IFileStorage
+    public class S3FileStorage : IFileStorage
     {
         private readonly IAmazonS3 _s3;
-        private readonly ILogger<R2FileStorage> _logger;
+        private readonly ILogger<S3FileStorage> _logger;
         private readonly string _bucket;
         private readonly string _publicBaseUrl;
 
-        public R2FileStorage(IConfiguration configuration, ILogger<R2FileStorage> logger)
+        public S3FileStorage(IConfiguration configuration, ILogger<S3FileStorage> logger)
         {
             _logger = logger;
             var section = configuration.GetSection("Storage");
-            var accountId = section["AccountId"] ?? string.Empty;
+            var serviceUrl = section["ServiceUrl"];
+            var accountId = section["AccountId"];
+            var region = section["Region"];
             var accessKey = section["AccessKey"] ?? string.Empty;
             var secretKey = section["SecretKey"] ?? string.Empty;
             _bucket = section["Bucket"] ?? string.Empty;
             _publicBaseUrl = (section["PublicBaseUrl"] ?? string.Empty).TrimEnd('/');
 
-            if (string.IsNullOrWhiteSpace(accountId) ||
+            if (string.IsNullOrWhiteSpace(serviceUrl) && !string.IsNullOrWhiteSpace(accountId))
+            {
+                serviceUrl = $"https://{accountId}.r2.cloudflarestorage.com";
+            }
+
+            if (string.IsNullOrWhiteSpace(serviceUrl) ||
                 string.IsNullOrWhiteSpace(accessKey) ||
                 string.IsNullOrWhiteSpace(secretKey) ||
                 string.IsNullOrWhiteSpace(_bucket))
             {
                 throw new InvalidOperationException(
-                    "Storage:Provider is 'r2' but AccountId, AccessKey, SecretKey or Bucket is missing.");
+                    "S3 storage needs Storage:ServiceUrl (or Storage:AccountId for R2), AccessKey, SecretKey and Bucket.");
             }
+
             _s3 = new AmazonS3Client(
                 new BasicAWSCredentials(accessKey, secretKey),
                 new AmazonS3Config
                 {
-                    ServiceURL = $"https://{accountId}.r2.cloudflarestorage.com",
-                    AuthenticationRegion = "auto",
-                    ForcePathStyle = true
+                    ServiceURL = serviceUrl,
+                    AuthenticationRegion = string.IsNullOrWhiteSpace(region) ? "auto" : region,
+                    ForcePathStyle = true,
+                    RequestChecksumCalculation = RequestChecksumCalculation.WHEN_REQUIRED,
+                    ResponseChecksumValidation = ResponseChecksumValidation.WHEN_REQUIRED
                 });
         }
 
@@ -81,7 +91,7 @@ namespace Infrastructure.Storage
             }
             catch (AmazonS3Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to delete '{Key}' from R2.", key);
+                _logger.LogWarning(ex, "Failed to delete '{Key}' from object storage.", key);
                 return false;
             }
         }

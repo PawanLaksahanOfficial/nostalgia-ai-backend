@@ -16,6 +16,7 @@ namespace Infrastructure.Services
         public int PrescaleHd { get; set; } = 2;
         public double ZoomAmount { get; set; } = 0.28;
         public string FallbackBackgroundColor { get; set; } = "0x2A2422";
+        public string Preset { get; set; } = "veryfast";
     }
 
     public static class FfmpegArgumentBuilder
@@ -95,7 +96,7 @@ namespace Infrastructure.Services
             args.Add("-c:v");
             args.Add("libx264");
             args.Add("-preset");
-            args.Add("veryfast");
+            args.Add(ResolvePreset(options.Preset));
             args.Add("-crf");
             args.Add(request.HighDefinition ? "20" : "23");
 
@@ -246,6 +247,16 @@ namespace Infrastructure.Services
                 $"aresample=48000,volume={Num(options.MusicVolume)}," +
                 $"afade=t=in:st=0:d=1.5,afade=t=out:st={Num(fadeOutStart)}:d=2";
         }
+
+        private static readonly HashSet<string> X264Presets = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"
+        };
+
+        public static string ResolvePreset(string? preset) =>
+            !string.IsNullOrWhiteSpace(preset) && X264Presets.Contains(preset.Trim())
+                ? preset.Trim().ToLowerInvariant()
+                : "veryfast";
 
         private static (int Width, int Height) ParseResolution(string value)
         {

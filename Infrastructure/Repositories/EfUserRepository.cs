@@ -191,5 +191,16 @@ namespace Infrastructure.Repositories
             var rowsAffected = await _dbContext.SaveChangesAsync();
             return rowsAffected > 0 ? existingUser : null;
         }
+
+        public async Task<bool> SetAvatarUrlAsync(int userId, string? avatarUrl)
+        {
+            var user = await _dbContext.Users
+                .FirstOrDefaultAsync(u => u.UserId == userId && !u.Deleted);
+            if (user == null) return false;
+            user.AvatarUrl = avatarUrl;
+            user.LastUpdatedDate = DateTime.UtcNow;
+            var rowsAffected = await _dbContext.SaveChangesAsync();
+            return rowsAffected > 0;
+        }
     }
 }
