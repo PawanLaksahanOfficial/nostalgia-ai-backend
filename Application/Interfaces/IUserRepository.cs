@@ -19,5 +19,6 @@ namespace Application.Interfaces
         Task<bool> UpdateProfileAsync(int userId, UpdateProfileRequest request);
         Task<User?> CreateSocialLoginUserAsync(UserModel model);
         Task<User?> ReactivateSocialLoginUserAsync(User existingUser, UserModel model);
+        Task<bool> SetAvatarUrlAsync(int userId, string? avatarUrl);
     }
 }

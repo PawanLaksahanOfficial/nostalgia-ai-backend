@@ -54,7 +54,7 @@ Notable pieces in `Infrastructure/Services/`:
 | `ShareLinkService`, `ShareTokenGenerator` | Share tokens, expiry, revocation |
 | `SubscriptionService` | Plans, quota, Stripe lifecycle |
 | `SesEmailService` | Transactional email (AWS SES) |
-| `R2FileStorage`, `LocalFileStorage` | Media storage (`Storage:Provider`) |
+| `S3FileStorage`, `LocalFileStorage` | Media storage (`Storage:Provider`): any S3-compatible bucket (Cloudflare R2, Supabase Storage) or local disk |
 
 ---
 
@@ -103,10 +103,10 @@ In production, supply the same keys as environment variables using `__` for nest
 | `JwtSettings` | `Key`, `Issuer`, `Audience`, `DurationInMinutes` | `Key` is a secret |
 | `AllowedOrigins` | comma-separated origins | Must include the deployed frontend origin |
 | `Frontend` | `BaseUrl` | Used to build share and password-reset links |
-| `Storage` | `Provider`, `AccountId`, `AccessKey`, `SecretKey`, `Bucket`, `PublicBaseUrl`, `LocalPath`, `BaseUrl` | `Provider` selects R2 or local disk |
-| `OpenRouter` | `ApiToken`, `Url`, `Model`, `TimeoutSeconds` | Narrative generation |
+| `Storage` | `Provider`, `ServiceUrl`, `Region`, `AccountId`, `AccessKey`, `SecretKey`, `Bucket`, `PublicBaseUrl`, `LocalPath`, `BaseUrl` | `Provider`: `local`, `r2` (set `AccountId`) or `s3` (set `ServiceUrl` + `Region`, e.g. Supabase Storage). Use a bucket in production: Render's disk is wiped on restart |
+| `OpenRouter` | `ApiToken`, `Url`, `Model`, `TimeoutSeconds` | Narrative generation. `Model` is a comma-separated fallback list; free models get retired, so check it if narration falls back to the raw story |
 | `Tts` | `Provider`, `EdgeTtsPath`, `Voice`, `Rate`, `TimeoutSeconds` | Narration |
-| `Video` | `FfmpegPath`, `FfprobePath`, `AssetsPath`, resolutions, `Fps`, `MaxImageBytes`, `MaxConcurrentJobs`, `JobTimeoutSeconds`, … | Render pipeline tuning |
+| `Video` | `FfmpegPath`, `FfprobePath`, `AssetsPath`, resolutions, `Fps`, `Preset`, `MaxImageBytes`, `MaxConcurrentJobs`, `JobTimeoutSeconds`, … | Render pipeline tuning. `appsettings.Production.json` lowers these for Render's free plan |
 | `Stripe` | `SecretKey`, `WebhookSecret`, `PremiumPriceId` | All secrets |
 | `AWS` | `AccessKey`, `SecretKey`, `Region` | SES credentials |
 | `Email` | `FromAddress` | Must be SES-verified |
@@ -207,7 +207,11 @@ binds to `$PORT` (default 8080), which suits Render and similar hosts. Supply al
 environment variables, set `AllowedOrigins` to the deployed frontend origin, and point
 `Frontend:BaseUrl` at it so emailed and shared links resolve.
 
-The runtime image does **not** include FFmpeg or Edge TTS. `Tts:Provider` selects narration:
-`"edge"` wires up `EdgeTtsService`, and any other value falls back to `NoOpTextToSpeech`
-(silent narration). FFmpeg has no such fallback — without the binaries at `Video:FfmpegPath`
-and `Video:FfprobePath`, composition fails and jobs end up `Failed`.
+The runtime image installs FFmpeg/FFprobe, the DejaVu font (watermark and captions) and the
+`edge-tts` CLI. `Tts:Provider` selects narration: `"edge"` wires up `EdgeTtsService`, and any
+other value falls back to `NoOpTextToSpeech` (silent narration). FFmpeg is required: while
+`/health` reports `"ffmpeg": false`, the worker leaves every job `Pending`. `/health` also
+reports `"database"`, and stays HTTP 200 with `"status": "Degraded"` when the database is down.
+
+Music loops are not committed; add CC0 tracks to `nostalgia-ai-backend/assets/music/` (see
+`CREDITS.md` there) or videos are rendered with narration and captions only.

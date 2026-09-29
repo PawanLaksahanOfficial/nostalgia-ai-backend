@@ -12,7 +12,8 @@ namespace Infrastructure.AI
 {
     public class AIService : IAIService
     {
-        private const string DefaultModel = "nvidia/nemotron-nano-12b-v2-vl:free";
+        private const string DefaultModels =
+            "google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free,qwen/qwen3.8-27b:free";
 
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly IConfiguration _configuration;
@@ -33,11 +34,7 @@ namespace Infrastructure.AI
             var section = _configuration.GetSection("OpenRouter");
             var url = section["Url"];
             var apiKey = section["ApiToken"];
-            var model = section["Model"];
-            if (string.IsNullOrWhiteSpace(model))
-            {
-                model = DefaultModel;
-            }
+            var models = ParseModels(section["Model"]);
 
             if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(apiKey))
             {
@@ -45,15 +42,21 @@ namespace Infrastructure.AI
                 throw new AIServiceException("The story generator is not configured.");
             }
 
-            var payload = JsonConvert.SerializeObject(new
+            var requestBody = new Dictionary<string, object>
             {
-                model,
-                messages = new[]
+                ["model"] = models[0],
+                ["messages"] = new[]
                 {
                     new { role = "system", content = "You are a nostalgic storyteller." },
                     new { role = "user", content = prompt }
                 }
-            });
+            };
+            if (models.Count > 1)
+            {
+                // OpenRouter tries these in order if the primary model fails.
+                requestBody["models"] = models;
+            }
+            var payload = JsonConvert.SerializeObject(requestBody);
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = new StringContent(payload, Encoding.UTF8, "application/json")
@@ -99,6 +102,17 @@ namespace Infrastructure.AI
                 }
                 return content;
             }
+        }
+
+        public static IReadOnlyList<string> ParseModels(string? configured)
+        {
+            var models = (string.IsNullOrWhiteSpace(configured) ? DefaultModels : configured)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return models.Count > 0
+                ? models
+                : DefaultModels.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         }
 
         private static string? ExtractContent(string body)

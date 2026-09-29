@@ -179,10 +179,11 @@ builder.Services.AddScoped<IShareLinkService, ShareLinkService>();
 builder.Services.AddScoped<IVideoComposer, FfmpegVideoComposer>();
 builder.Services.AddScoped<IMusicProvider, BundledMusicProvider>();
 
-// Storage: local disk for development, R2 anywhere the filesystem is ephemeral.
-if (string.Equals(builder.Configuration.GetSection("Storage")["Provider"], "r2", StringComparison.OrdinalIgnoreCase))
+var storageProvider = builder.Configuration.GetSection("Storage")["Provider"];
+if (string.Equals(storageProvider, "r2", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(storageProvider, "s3", StringComparison.OrdinalIgnoreCase))
 {
-    builder.Services.AddScoped<IFileStorage, R2FileStorage>();
+    builder.Services.AddScoped<IFileStorage, S3FileStorage>();
 }
 else
 {
@@ -223,11 +224,26 @@ app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
 
-app.MapGet("/health", async (IVideoComposer composer, ITextToSpeech tts) => Results.Ok(new
+app.MapGet("/health", async (IVideoComposer composer, ITextToSpeech tts, EFDbContext db) =>
 {
-    status = "Healthy",
-    ffmpeg = await composer.IsAvailableAsync(),
-    tts = tts.IsEnabled
-}));
+    bool database;
+    try
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        database = await db.Database.CanConnectAsync(timeout.Token);
+    }
+    catch
+    {
+        database = false;
+    }
+    var ffmpeg = await composer.IsAvailableAsync();
+    return Results.Ok(new
+    {
+        status = database ? "Healthy" : "Degraded",
+        database,
+        ffmpeg,
+        tts = tts.IsEnabled
+    });
+});
 
 app.Run();
