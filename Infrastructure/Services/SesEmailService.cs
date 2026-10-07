@@ -3,21 +3,24 @@ using Amazon.SimpleEmail;
 using Amazon.SimpleEmail.Model;
 using Application.Interfaces;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Services
 {
     public class SesEmailService : IEmailService
     {
         private readonly IAmazonSimpleEmailService _sesClient;
+        private readonly ILogger<SesEmailService> _logger;
         private readonly string _fromAddress;
         private readonly string _frontendBaseUrl;
 
-        public SesEmailService(IConfiguration configuration)
+        public SesEmailService(IConfiguration configuration, ILogger<SesEmailService> logger)
         {
+            _logger = logger;
             var accessKey = configuration["AWS:AccessKey"] ?? string.Empty;
             var secretKey = configuration["AWS:SecretKey"] ?? string.Empty;
             var region = configuration["AWS:Region"] ?? "us-east-1";
-            _fromAddress = configuration["Email:FromAddress"] ?? "noreply@nostalgia-ai.com";
+            _fromAddress = configuration["Email:FromAddress"] ?? string.Empty;
             _frontendBaseUrl = configuration["Frontend:BaseUrl"] ?? "http://localhost:5173";
 
             _sesClient = string.IsNullOrEmpty(accessKey) || string.IsNullOrEmpty(secretKey)
@@ -27,40 +30,21 @@ namespace Infrastructure.Services
 
         public async Task<bool> SendPasswordResetEmailAsync(string email, string resetToken, string userName)
         {
-            var resetLink = $"{_frontendBaseUrl}/reset-password?token={resetToken}&email={Uri.EscapeDataString(email)}";
-            var subject = "Reset Your Password - Nostalgia AI";
-            var body = $@"
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset='utf-8'>
-                </head>
-                <body style='font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f4;'>
-                    <div style='max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 30px;'>
-                        <h1 style='color: #333;'>Password Reset Request</h1>
-                        <p>Hi {userName},</p>
-                        <p>We received a request to reset your password for your Nostalgia AI account.</p>
-                        <p>Click the button below to reset your password. This link is valid for 1 hour.</p>
-                        <div style='text-align: center; margin: 30px 0;'>
-                            <a href='{resetLink}' 
-                               style='background-color: #007bff; color: #ffffff; padding: 12px 30px; 
-                                      text-decoration: none; border-radius: 5px; font-size: 16px;'>
-                                Reset Password
-                            </a>
-                        </div>
-                        <p>If you didn't request this, you can safely ignore this email.</p>
-                        <p>If the button doesn't work, copy and paste this link into your browser:</p>
-                        <p style='word-break: break-all; color: #666;'>{resetLink}</p>
-                        <hr style='border: none; border-top: 1px solid #eee; margin: 20px 0;'>
-                        <p style='color: #999; font-size: 12px;'>Nostalgia AI - Preserving your precious memories</p>
-                    </div>
-                </body>
-                </html>";
-            return await SendEmailAsync(email, subject, body);
+            var resetLink = EmailTemplates.PasswordResetLink(_frontendBaseUrl, resetToken, email);
+            var content = EmailTemplates.PasswordReset(resetLink, userName);
+            return await SendAsync(email, content.Subject, content.HtmlBody, content.TextBody);
         }
 
-        public async Task<bool> SendEmailAsync(string to, string subject, string body)
+        public Task<bool> SendEmailAsync(string to, string subject, string body) =>
+            SendAsync(to, subject, body, "Please view this email in an HTML-compatible email client.");
+
+        private async Task<bool> SendAsync(string to, string subject, string htmlBody, string textBody)
         {
+            if (string.IsNullOrWhiteSpace(_fromAddress))
+            {
+                _logger.LogError("SES email not sent: Email:FromAddress is not configured.");
+                return false;
+            }
             try
             {
                 var sendRequest = new SendEmailRequest
@@ -75,8 +59,8 @@ namespace Infrastructure.Services
                         Subject = new Content(subject),
                         Body = new Body
                         {
-                            Html = new Content(body),
-                            Text = new Content("Please view this email in an HTML-compatible email client.")
+                            Html = new Content(htmlBody),
+                            Text = new Content(textBody)
                         }
                     }
                 };
@@ -84,8 +68,10 @@ namespace Infrastructure.Services
                 var response = await _sesClient.SendEmailAsync(sendRequest);
                 return response.HttpStatusCode == System.Net.HttpStatusCode.OK;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Common causes: an unverified sender address, or an account still in the SES sandbox.
+                _logger.LogError(ex, "SES failed to send email '{Subject}'.", subject);
                 return false;
             }
         }

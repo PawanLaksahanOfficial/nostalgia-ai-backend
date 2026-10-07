@@ -106,6 +106,7 @@ In production, supply the same keys as environment variables using `__` for nest
 | `Storage` | `Provider`, `ServiceUrl`, `Region`, `AccountId`, `AccessKey`, `SecretKey`, `Bucket`, `PublicBaseUrl`, `LocalPath`, `BaseUrl` | `Provider`: `local`, `r2` (set `AccountId`) or `s3` (set `ServiceUrl` + `Region`, e.g. Supabase Storage). Use a bucket in production: Render's disk is wiped on restart |
 | `OpenRouter` | `ApiToken`, `Url`, `Model`, `TimeoutSeconds` | Narrative generation. `Model` is a comma-separated fallback list; free models get retired, so check it if narration falls back to the raw story |
 | `Tts` | `Provider`, `EdgeTtsPath`, `Voice`, `Rate`, `TimeoutSeconds` | Narration |
+| `Pixabay`, `Pexels` | `ApiKey` | Stock photos for the slideshow. Pixabay is used when its key is set (Pexels paused new keys in Oct 2026); with neither, videos without an uploaded photo get a plain background |
 | `Video` | `FfmpegPath`, `FfprobePath`, `AssetsPath`, resolutions, `Fps`, `Preset`, `MaxImageBytes`, `MaxConcurrentJobs`, `JobTimeoutSeconds`, … | Render pipeline tuning. `appsettings.Production.json` lowers these for Render's free plan |
 | `Stripe` | `SecretKey`, `WebhookSecret`, `PremiumPriceId` | All secrets |
 | `AWS` | `AccessKey`, `SecretKey`, `Region` | SES credentials |

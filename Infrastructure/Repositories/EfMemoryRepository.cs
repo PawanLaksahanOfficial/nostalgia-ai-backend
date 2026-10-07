@@ -42,10 +42,19 @@ namespace Infrastructure.Repositories
             return memory.Id;
         }
 
-        public async Task<bool> UpdateAsync(UserMemory memory)
+        public async Task<bool> RenameAsync(int id, int userId, string title)
         {
-            _dbContext.UserMemories.Update(memory);
-            var rows = await _dbContext.SaveChangesAsync();
+            var rows = await _dbContext.UserMemories
+                .Where(m => m.Id == id && m.UserId == userId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(m => m.Title, title));
+            return rows > 0;
+        }
+
+        public async Task<bool> SetPublicAsync(int id, bool isPublic)
+        {
+            var rows = await _dbContext.UserMemories
+                .Where(m => m.Id == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(m => m.IsPublic, isPublic));
             return rows > 0;
         }
 

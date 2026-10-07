@@ -5,6 +5,7 @@ using Google.Apis.Auth;
 using System.Net.Http;
 using Infrastructure.Data;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using System;
 using System.Collections.Generic;
@@ -22,44 +23,63 @@ namespace Infrastructure.Services
         private readonly EFDbContext _dbContext;
         private readonly IConfiguration _configuration;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ILogger<AuthenticationService> _logger;
 
-        public AuthenticationService(EFDbContext dbContext, IConfiguration configuration, IHttpClientFactory httpClientFactory)
+        public AuthenticationService(
+            EFDbContext dbContext,
+            IConfiguration configuration,
+            IHttpClientFactory httpClientFactory,
+            ILogger<AuthenticationService> logger)
         {
             _dbContext = dbContext;
             _configuration = configuration;
             _httpClientFactory = httpClientFactory;
+            _logger = logger;
         }
+
+        public static IReadOnlyList<string> ParseGoogleClientIds(string? configured) =>
+            (configured ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
 
         public async Task<GoogleJsonWebSignature.Payload?> ValidateGoogleAuthenticationTokenAsync(string token)
         {
-            var googleClientID = _configuration["GoogleClientId"];
-            if (!string.IsNullOrEmpty(googleClientID))
+            var clientIds = ParseGoogleClientIds(_configuration["GoogleClientId"]);
+            if (clientIds.Count == 0)
             {
-                var googleClientIDString = googleClientID.ToString();
-                if (!string.IsNullOrEmpty(googleClientIDString))
-                {
-                    var settings = new GoogleJsonWebSignature.ValidationSettings()
-                    {
-                        Audience = new List<string> { googleClientIDString.Trim() }
-                    };
-
-                    GoogleJsonWebSignature.Payload payload;
-                    try
-                    {
-                        payload = await GoogleJsonWebSignature.ValidateAsync(token, settings);
-                    }
-                    catch (InvalidJwtException)
-                    {
-                        return null;
-                    }
-                    if (payload == null || string.IsNullOrEmpty(payload.Email) || !payload.EmailVerified)
-                    {
-                        return null;
-                    }
-                    return payload;
-                }
+                _logger.LogWarning("Google sign-in rejected: GoogleClientId is not configured.");
+                return null;
             }
-            return null;
+
+            var settings = new GoogleJsonWebSignature.ValidationSettings
+            {
+                Audience = clientIds
+            };
+
+            GoogleJsonWebSignature.Payload payload;
+            try
+            {
+                payload = await GoogleJsonWebSignature.ValidateAsync(token, settings);
+            }
+            catch (InvalidJwtException ex)
+            {
+                // Client IDs are public, so logging them makes an audience mismatch obvious.
+                _logger.LogWarning("Google sign-in rejected: {Reason} Accepted client IDs: {ClientIds}.",
+                    ex.Message, string.Join(", ", clientIds));
+                return null;
+            }
+            if (payload == null || string.IsNullOrEmpty(payload.Email))
+            {
+                _logger.LogWarning("Google sign-in rejected: the token has no email address.");
+                return null;
+            }
+            if (!payload.EmailVerified)
+            {
+                _logger.LogWarning("Google sign-in rejected: the Google account's email is not verified.");
+                return null;
+            }
+            return payload;
         }
 
         public async Task<MetaUserDto?> ValidateMetaAuthenticationTokenAsync(string token)

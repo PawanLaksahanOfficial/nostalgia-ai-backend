@@ -26,6 +26,7 @@ namespace Infrastructure.Data
                       .HasForeignKey(um => um.UserId)
                       .OnDelete(DeleteBehavior.Cascade);
                 entity.HasIndex(um => um.Status);
+                entity.Property(um => um.StockPhotoCredit).HasMaxLength(500);
             });
 
             modelBuilder.Entity<MemoryShareLink>(entity =>

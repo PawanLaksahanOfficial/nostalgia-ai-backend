@@ -170,14 +170,40 @@ builder.Services.AddScoped<IUserRepository, EfUserRepository>();
 builder.Services.AddScoped<IMemoryRepository, EfMemoryRepository>();
 builder.Services.AddScoped<IPasswordHasher, PasswordHasherService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
-builder.Services.AddScoped<IEmailService, SesEmailService>();
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+
+// Email: Brevo's free HTTP API by default; SES stays available for later.
+if (string.Equals(builder.Configuration.GetSection("Email")["Provider"], "ses", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddScoped<IEmailService, SesEmailService>();
+}
+else
+{
+    builder.Services.AddHttpClient(BrevoEmailService.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(15));
+    builder.Services.AddScoped<IEmailService, BrevoEmailService>();
+}
 
 // Video management and sharing
 builder.Services.AddScoped<IShareLinkRepository, EfShareLinkRepository>();
 builder.Services.AddScoped<IShareLinkService, ShareLinkService>();
 builder.Services.AddScoped<IVideoComposer, FfmpegVideoComposer>();
 builder.Services.AddScoped<IMusicProvider, BundledMusicProvider>();
+
+// Free stock photos give every video visuals. Pixabay is used when its key is set (Pexels paused new
+// API keys in October 2026); otherwise Pexels, which is a no-op without Pexels:ApiKey.
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Pixabay:ApiKey"]))
+{
+    // Pixabay takes the key in the query string, which HttpClient's request logging would write out.
+    builder.Services.AddHttpClient(PixabayStockPhotoProvider.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(20))
+        .RemoveAllLoggers();
+    // A singleton so its 24-hour search cache, required by Pixabay's API terms, outlives each job.
+    builder.Services.AddSingleton<IStockPhotoProvider, PixabayStockPhotoProvider>();
+}
+else
+{
+    builder.Services.AddHttpClient(PexelsStockPhotoProvider.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(20));
+    builder.Services.AddScoped<IStockPhotoProvider, PexelsStockPhotoProvider>();
+}
 
 var storageProvider = builder.Configuration.GetSection("Storage")["Provider"];
 if (string.Equals(storageProvider, "r2", StringComparison.OrdinalIgnoreCase) ||

@@ -73,14 +73,23 @@ namespace nostalgia_ai_backend.Controllers
                     "Monthly memory limit reached. Upgrade to Premium for a higher limit."));
             }
 
+            string? imageKey = null;
             try
             {
+                if (image is { Length: > 0 } && extension != null)
+                {
+                    imageKey = $"memories/uploads/{userId}/{Guid.NewGuid():N}{extension}";
+                    await using var content = image.OpenReadStream();
+                    await _fileStorage.UploadAsync(imageKey, content, contentType!);
+                }
+
                 var memory = new UserMemory
                 {
                     UserId = userId,
                     Title = request.Title,
                     StoryText = request.StoryText,
                     MusicMood = request.MusicMood,
+                    UserImagePath = imageKey,
                     Quality = string.Equals(quota.Quality, "hd", StringComparison.OrdinalIgnoreCase)
                         ? VideoQuality.HD
                         : VideoQuality.Standard,
@@ -92,26 +101,34 @@ namespace nostalgia_ai_backend.Controllers
                 var id = await _memoryRepository.CreateAsync(memory);
                 if (id <= 0)
                 {
+                    await DeleteUploadedImageAsync(imageKey);
                     await _subscriptionService.RefundQuotaAsync(userId);
                     return BadRequest(ApiResponse<object>.Fail("Failed to create the video."));
-                }
-                if (image is { Length: > 0 } && extension != null)
-                {
-                    var key = $"memories/{id}/source{extension}";
-
-                    await using var content = image.OpenReadStream();
-                    await _fileStorage.UploadAsync(key, content, contentType!);
-
-                    memory.UserImagePath = key;
-                    await _memoryRepository.UpdateAsync(memory);
                 }
                 return Ok(ApiResponse<object>.Ok(
                     new { id, status = VideoStatus.Pending.ToString() }, "Your video is being created."));
             }
             catch
             {
+                await DeleteUploadedImageAsync(imageKey);
                 await _subscriptionService.RefundQuotaAsync(userId);
                 throw;
+            }
+        }
+
+        private async Task DeleteUploadedImageAsync(string? key)
+        {
+            if (string.IsNullOrEmpty(key))
+            {
+                return;
+            }
+            try
+            {
+                await _fileStorage.DeleteAsync(key);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not delete orphaned upload '{Key}'.", key);
             }
         }
 
@@ -150,20 +167,19 @@ namespace nostalgia_ai_backend.Controllers
                 memory.FailureReason,
                 HasVideo = !string.IsNullOrEmpty(memory.FinalVideoPath),
                 memory.DurationSeconds,
-                memory.CompletedAt
+                memory.CompletedAt,
+                NarrationSource = memory.NarrationSource?.ToString(),
+                memory.StockPhotoCredit
             }));
         }
 
         [HttpPut("{id:int}")]
         public async Task<ActionResult<ApiResponse<object>>> RenameVideo(int id, [FromBody] UpdateVideoRequest request)
         {
-            var memory = await _memoryRepository.GetByIdForUserAsync(id, GetUserId());
-            if (memory == null)
+            if (!await _memoryRepository.RenameAsync(id, GetUserId(), request.Title.Trim()))
             {
                 return NotFound(ApiResponse<object>.NotFound("Video not found."));
             }
-            memory.Title = request.Title.Trim();
-            await _memoryRepository.UpdateAsync(memory);
             return Ok(ApiResponse<object>.Ok(new { }, "Video renamed."));
         }
 
@@ -316,6 +332,8 @@ namespace nostalgia_ai_backend.Controllers
             memory.FailureReason,
             HasVideo = !string.IsNullOrEmpty(memory.FinalVideoPath),
             HasThumbnail = !string.IsNullOrEmpty(memory.ThumbnailPath),
+            NarrationSource = memory.NarrationSource?.ToString(),
+            memory.StockPhotoCredit,
             memory.CreatedAt,
             memory.CompletedAt
         };
@@ -335,6 +353,8 @@ namespace nostalgia_ai_backend.Controllers
             memory.FailureReason,
             HasVideo = !string.IsNullOrEmpty(memory.FinalVideoPath),
             HasThumbnail = !string.IsNullOrEmpty(memory.ThumbnailPath),
+            NarrationSource = memory.NarrationSource?.ToString(),
+            memory.StockPhotoCredit,
             memory.CreatedAt,
             memory.CompletedAt,
             memory.StoryText,

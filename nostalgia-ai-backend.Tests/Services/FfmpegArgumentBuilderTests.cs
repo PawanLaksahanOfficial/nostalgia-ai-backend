@@ -19,7 +19,7 @@ namespace nostalgia_ai_backend.Tests.Services
             {
                 MemoryId = 1,
                 WorkingDirectory = "/tmp/job",
-                ImageFileName = image,
+                ImageFileNames = image == null ? new List<string>() : new List<string> { image },
                 VoiceoverFileName = voice,
                 MusicFileName = music,
                 CaptionsFileName = captions,
@@ -145,6 +145,67 @@ namespace nostalgia_ai_backend.Tests.Services
             // Rendered above output size, then scaled back down, to stop it shimmering.
             Assert.Contains("scale=5120:2880", filters);
         }
+
+        private static VideoCompositionRequest Slideshow(int images, double duration = 20, string? voice = null) => new()
+        {
+            MemoryId = 1,
+            WorkingDirectory = "/tmp/job",
+            ImageFileNames = Enumerable.Range(0, images).Select(i => $"img{i}.jpg").ToList(),
+            VoiceoverFileName = voice,
+            DurationSeconds = duration
+        };
+
+        [Fact]
+        public void A_single_image_needs_no_crossfade()
+        {
+            Assert.DoesNotContain("xfade", Build(Request()));
+        }
+
+        [Theory]
+        [InlineData(2)]
+        [InlineData(3)]
+        [InlineData(4)]
+        public void Chains_one_crossfade_between_each_pair_of_slides(int images)
+        {
+            var args = FfmpegArgumentBuilder.BuildCompose(Slideshow(images), _options);
+            var filters = string.Join(" ", args);
+
+            Assert.Equal(images, args.Count(a => a.StartsWith("img", StringComparison.Ordinal)));
+            Assert.Equal(images, CountOf(filters, "zoompan="));
+            Assert.Equal(images - 1, CountOf(filters, "xfade="));
+            Assert.Contains($"[x{images - 1}]format=yuv420p", filters);
+        }
+
+        [Fact]
+        public void Places_crossfades_so_the_slides_fill_the_whole_duration()
+        {
+            // 3 slides over 20s with 0.8s fades: each slide is (20 + 2*0.8) / 3 = 7.2s long.
+            var filters = Build(Slideshow(3, duration: 20));
+
+            Assert.Contains("[s0][s1]xfade=transition=fade:duration=0.8:offset=6.4[x1]", filters);
+            Assert.Contains("[x1][s2]xfade=transition=fade:duration=0.8:offset=12.8[x2]", filters);
+        }
+
+        [Fact]
+        public void Shortens_the_crossfade_when_slides_are_very_short()
+        {
+            // 4 slides in 4s: a 0.8s fade would swallow most of each slide.
+            var filters = Build(Slideshow(4, duration: 4));
+
+            Assert.Contains("xfade=transition=fade:duration=0.333", filters);
+        }
+
+        [Fact]
+        public void Numbers_the_audio_inputs_after_every_slide()
+        {
+            var filters = Build(Slideshow(3, voice: "voice.mp3"));
+
+            // img0..img2 are inputs 0-2, so the voice is input 3.
+            Assert.Contains("[3:a]aresample=48000,apad[aout]", filters);
+        }
+
+        private static int CountOf(string text, string value) =>
+            (text.Length - text.Replace(value, string.Empty).Length) / value.Length;
 
         [Fact]
         public void Formats_numbers_invariantly_regardless_of_the_current_culture()

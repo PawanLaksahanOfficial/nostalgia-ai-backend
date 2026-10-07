@@ -8,7 +8,8 @@ namespace Application.Interfaces
         Task<UserMemory?> GetByIdForUserAsync(int id, int userId);
         Task<IEnumerable<UserMemory>> GetByUserIdAsync(int userId);
         Task<int> CreateAsync(UserMemory memory);
-        Task<bool> UpdateAsync(UserMemory memory);
+        Task<bool> RenameAsync(int id, int userId, string title);
+        Task<bool> SetPublicAsync(int id, bool isPublic);
         Task<bool> DeleteAsync(int id);
         Task<IEnumerable<UserMemory>> GetPendingAsync(int max);
         Task<bool> TryClaimForProcessingAsync(int id);
