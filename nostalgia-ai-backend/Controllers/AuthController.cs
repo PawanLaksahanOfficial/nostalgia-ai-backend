@@ -1,6 +1,9 @@
+using System.Security.Claims;
 using Application.DTOs;
 using Application.Interfaces;
 using Domain.Entities;
+using Infrastructure.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +20,9 @@ namespace nostalgia_ai_backend.Controllers
         private readonly IUserRepository _userRepository;
         private readonly IAuthenticationService _authenticationService;
         private readonly IEmailService _emailService;
+        private readonly IpAddressHasher _ipAddressHasher;
+        private readonly DisposableEmailDomains _disposableEmailDomains;
+        private readonly int _perIpDailySignupLimit;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
@@ -24,18 +30,29 @@ namespace nostalgia_ai_backend.Controllers
             IUserRepository userRepository,
             IAuthenticationService authenticationService,
             IEmailService emailService,
+            IpAddressHasher ipAddressHasher,
+            DisposableEmailDomains disposableEmailDomains,
+            IConfiguration configuration,
             ILogger<AuthController> logger)
         {
             _passwordHasher = passwordHasher;
             _userRepository = userRepository;
             _authenticationService = authenticationService;
             _emailService = emailService;
+            _ipAddressHasher = ipAddressHasher;
+            _disposableEmailDomains = disposableEmailDomains;
+            _perIpDailySignupLimit = configuration.GetSection("Abuse").GetValue("PerIpDailySignupLimit", 3);
             _logger = logger;
         }
 
         [HttpPost("register")]
         public async Task<ActionResult<ApiResponse<AuthResponse>>> Register([FromBody] RegisterRequest request)
         {
+            if (_disposableEmailDomains.IsDisposable(request.Email))
+            {
+                return BadRequest(ApiResponse<AuthResponse>.Fail("Please sign up with a permanent email address."));
+            }
+            var signupIpHash = _ipAddressHasher.Hash(HttpContext.Connection.RemoteIpAddress);
             try
             {
                 var existingUser = await _userRepository.GetUserByEmailIncludingDeletedAsync(request.Email);
@@ -44,6 +61,19 @@ namespace nostalgia_ai_backend.Controllers
                 if (existingUser != null && !existingUser.Deleted)
                 {
                     return Conflict(ApiResponse<AuthResponse>.Fail("Email already registered."));
+                }
+
+                // Gmail dots and "+tag" aliases reach the same inbox, so they count as the same account.
+                if (existingUser == null && await _userRepository.GetUserByCanonicalEmailAsync(request.Email) != null)
+                {
+                    return Conflict(ApiResponse<AuthResponse>.Fail("Email already registered."));
+                }
+
+                if (signupIpHash != null && _perIpDailySignupLimit > 0 &&
+                    await _userRepository.CountUsersCreatedFromIpSinceAsync(signupIpHash, DateTime.UtcNow.AddDays(-1)) >= _perIpDailySignupLimit)
+                {
+                    return StatusCode(StatusCodes.Status429TooManyRequests, ApiResponse<AuthResponse>.Fail(
+                        "Too many accounts were created from your network today. Please try again tomorrow."));
                 }
 
                 var passwordHash = _passwordHasher.Hash(request.Password);
@@ -57,19 +87,21 @@ namespace nostalgia_ai_backend.Controllers
                         return BadRequest(ApiResponse<AuthResponse>.Fail("Failed to reactivate account."));
                     }
 
+                    await SendVerificationEmailAsync(reactivatedUser);
                     var response = CreateAuthResponse(reactivatedUser);
-                    return Ok(ApiResponse<AuthResponse>.Ok(response, "Account reactivated successfully."));
+                    return Ok(ApiResponse<AuthResponse>.Ok(response, "Account reactivated. Check your inbox to verify your email."));
                 }
 
                 // Create new user
-                var newUser = await _userRepository.RegisterUserAsync(request, passwordHash);
+                var newUser = await _userRepository.RegisterUserAsync(request, passwordHash, signupIpHash);
                 if (newUser == null)
                 {
                     return BadRequest(ApiResponse<AuthResponse>.Fail("Failed to create account."));
                 }
 
+                await SendVerificationEmailAsync(newUser);
                 var authResponse = CreateAuthResponse(newUser);
-                return Ok(ApiResponse<AuthResponse>.Ok(authResponse, "Registration successful."));
+                return Ok(ApiResponse<AuthResponse>.Ok(authResponse, "Registration successful. Check your inbox to verify your email."));
             }
             catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
             {
@@ -160,6 +192,56 @@ namespace nostalgia_ai_backend.Controllers
             }
 
             return Ok(ApiResponse<object>.Ok(new { }, "Password reset successful."));
+        }
+
+        [HttpPost("verify-email")]
+        public async Task<ActionResult<ApiResponse<object>>> VerifyEmail([FromBody] VerifyEmailRequest request)
+        {
+            if (!await _userRepository.VerifyEmailAsync(request.Email, request.Token))
+            {
+                return BadRequest(ApiResponse<object>.Fail(
+                    "This verification link is invalid or has expired. Sign in to get a new one."));
+            }
+            return Ok(ApiResponse<object>.Ok(new { }, "Your email is verified. You can create videos now."));
+        }
+
+        [HttpPost("resend-verification")]
+        [Authorize]
+        public async Task<ActionResult<ApiResponse<object>>> ResendVerification()
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var user = int.TryParse(userIdClaim, out var userId) ? await _userRepository.GetByIdAsync(userId) : null;
+            if (user == null)
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Invalid or missing authentication token."));
+            }
+            if (user.EmailVerified)
+            {
+                return Ok(ApiResponse<object>.Ok(new { }, "Your email is already verified."));
+            }
+            await SendVerificationEmailAsync(user);
+            return Ok(ApiResponse<object>.Ok(new { }, $"We sent a new link to {user.Email}."));
+        }
+
+        // A failed send is logged rather than failing sign-up: the user can ask for another link.
+        private async Task SendVerificationEmailAsync(User user)
+        {
+            var token = new EmailVerificationToken
+            {
+                UserId = user.UserId,
+                Token = Guid.NewGuid().ToString("N"),
+                ExpiresAt = DateTime.UtcNow.AddHours(24),
+                CreatedAt = DateTime.UtcNow
+            };
+            if (!await _userRepository.CreateEmailVerificationTokenAsync(token))
+            {
+                _logger.LogError("Failed to create an email verification token for user {UserId}.", user.UserId);
+                return;
+            }
+            if (!await _emailService.SendEmailVerificationAsync(user.Email, token.Token, $"{user.FirstName} {user.LastName}"))
+            {
+                _logger.LogError("Failed to send the verification email for user {UserId}.", user.UserId);
+            }
         }
 
         private AuthResponse CreateAuthResponse(User user) =>

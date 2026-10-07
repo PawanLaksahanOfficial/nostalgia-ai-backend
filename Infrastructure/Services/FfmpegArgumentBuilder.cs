@@ -18,6 +18,9 @@ namespace Infrastructure.Services
         public double CrossfadeSeconds { get; set; } = 0.8;
         public string FallbackBackgroundColor { get; set; } = "0x2A2422";
         public string Preset { get; set; } = "veryfast";
+        public string MotionStyle { get; set; } = "zoom";
+        public bool FullChromaZoom { get; set; }
+        public double PanPixelsPerSecond { get; set; } = 12;
     }
 
     public static class FfmpegArgumentBuilder
@@ -176,7 +179,6 @@ namespace Infrastructure.Services
             string current;
             if (imageCount == 0)
             {
-                // The colour source is input 0; Ken Burns makes no sense on a flat colour.
                 current = "[0:v]";
             }
             else
@@ -190,9 +192,13 @@ namespace Infrastructure.Services
                 // A full zoom on every short slide feels rushed, so slideshows zoom less per slide.
                 var zoomAmount = imageCount == 1 ? options.ZoomAmount : options.ZoomAmount * 0.6;
 
+                var pan = string.Equals(options.MotionStyle, "pan", StringComparison.OrdinalIgnoreCase);
                 for (var i = 0; i < imageCount; i++)
                 {
-                    chains.Add($"[{i}:v]{KenBurns(request, options, width, height, fps, segmentFrames, zoomAmount, zoomIn: i % 2 == 0)}[s{i}]");
+                    var motion = pan
+                        ? Pan(request, options, width, height, fps, segmentFrames, leftToRight: i % 2 == 0)
+                        : KenBurns(request, options, width, height, fps, segmentFrames, zoomAmount, zoomIn: i % 2 == 0);
+                    chains.Add($"[{i}:v]{motion}[s{i}]");
                 }
 
                 current = "[s0]";
@@ -233,7 +239,6 @@ namespace Infrastructure.Services
             return string.Join(";", chains);
         }
 
-        // Rendered above the output size and scaled back down so the slow zoom doesn't shimmer.
         private static string KenBurns(
             VideoCompositionRequest request,
             VideoEncodingOptions options,
@@ -249,18 +254,49 @@ namespace Infrastructure.Services
             var wideHeight = height * prescale;
             var zoomPerFrame = Num(zoomAmount / frames, "0.#########");
             var maxZoom = Num(1 + zoomAmount, "0.####");
-            // Alternating zoom in and out keeps a slideshow from feeling repetitive.
             var zoom = zoomIn
                 ? $"min(1+{zoomPerFrame}*on,{maxZoom})"
                 : $"max({maxZoom}-{zoomPerFrame}*on,1)";
             return
                 $"scale={wideWidth}:{wideHeight}:force_original_aspect_ratio=increase," +
                 $"crop={wideWidth}:{wideHeight}," +
+                (options.FullChromaZoom ? "format=yuv444p," : string.Empty) +
                 $"zoompan=z='{zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'" +
                 $":d={frames}:s={width}x{height}:fps={fps}," +
                 // xfade needs every segment in the same pixel format and aspect ratio.
                 "setsar=1,format=yuv420p";
         }
+
+        private static string Pan(
+            VideoCompositionRequest request,
+            VideoEncodingOptions options,
+            int width,
+            int height,
+            int fps,
+            int frames,
+            bool leftToRight)
+        {
+            var prescale = Math.Max(1, request.HighDefinition ? options.PrescaleHd : options.PrescaleStandard);
+            var wideWidth = width * prescale;
+            var wideHeight = height * prescale;
+            var step = Math.Max(1, (int)Math.Round(options.PanPixelsPerSecond * prescale / fps));
+            var travel = step * Math.Max(0, frames - 1);
+            var canvasWidth = RoundUpToEven(wideWidth + travel);
+            var canvasHeight = RoundUpToEven((int)Math.Ceiling(canvasWidth * (double)height / width));
+            var x = leftToRight ? $"n*{step}" : $"{travel}-n*{step}";
+            return
+                $"scale={canvasWidth}:{canvasHeight}:force_original_aspect_ratio=increase," +
+                $"crop={canvasWidth}:{canvasHeight}," +
+                // 4:4:4 lets the crop move one pixel at a time; 4:2:0 would snap it to even pixels.
+                "format=yuv444p,setsar=1," +
+                // Scale the photo once and repeat that frame, instead of rescaling the photo for every frame.
+                $"loop=loop={Math.Max(0, frames - 1)}:size=1:start=0,settb=1/{fps},setpts=N," +
+                $"crop={wideWidth}:{wideHeight}:x='{x}':y={(canvasHeight - wideHeight) / 2}:exact=1," +
+                $"scale={width}:{height},fps={fps}," +
+                "setsar=1,format=yuv420p";
+        }
+
+        private static int RoundUpToEven(int value) => value % 2 == 0 ? value : value + 1;
 
         private static string BuildAudioChain(
             VideoEncodingOptions options,

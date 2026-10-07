@@ -38,7 +38,10 @@ namespace Infrastructure.Services
                 ZoomAmount = section.GetValue("ZoomAmount", 0.28),
                 CrossfadeSeconds = section.GetValue("CrossfadeSeconds", 0.8),
                 FallbackBackgroundColor = section["FallbackBackgroundColor"] ?? "0x2A2422",
-                Preset = section["Preset"] ?? "veryfast"
+                Preset = section["Preset"] ?? "veryfast",
+                MotionStyle = section["MotionStyle"] ?? "zoom",
+                FullChromaZoom = section.GetValue("FullChromaZoom", false),
+                PanPixelsPerSecond = section.GetValue("PanPixelsPerSecond", 12.0)
             };
         }
 

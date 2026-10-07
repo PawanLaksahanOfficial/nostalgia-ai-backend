@@ -35,9 +35,15 @@ namespace Infrastructure.Repositories
                 .ToListAsync();
         }
 
-        public async Task<int> CreateAsync(UserMemory memory)
+        public async Task<int> CreateAsync(UserMemory memory, string? requesterIpHash)
         {
             _dbContext.UserMemories.Add(memory);
+            _dbContext.VideoRequests.Add(new VideoRequest
+            {
+                UserId = memory.UserId,
+                IpHash = requesterIpHash,
+                CreatedAt = memory.CreatedAt
+            });
             await _dbContext.SaveChangesAsync();
             return memory.Id;
         }
@@ -100,5 +106,11 @@ namespace Infrastructure.Repositories
                     .SetProperty(m => m.ProcessingStartedAt, (DateTime?)null)
                     .SetProperty(m => m.ProcessingStep, (string?)null));
         }
+
+        public Task<int> CountRequestsSinceAsync(DateTime since) =>
+            _dbContext.VideoRequests.CountAsync(r => r.CreatedAt >= since);
+
+        public Task<int> CountRequestsFromIpSinceAsync(string ipHash, DateTime since) =>
+            _dbContext.VideoRequests.CountAsync(r => r.IpHash == ipHash && r.CreatedAt >= since);
     }
 }

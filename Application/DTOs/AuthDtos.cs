@@ -30,6 +30,7 @@ namespace Application.DTOs
         public string Tier { get; set; } = "free";
         public int MonthlyMemoriesUsed { get; set; }
         public int MonthlyMemoriesLimit { get; set; }
+        public bool EmailVerified { get; set; }
     }
 
     public class UpdateProfileRequest
@@ -57,6 +58,12 @@ namespace Application.DTOs
         public string NewPassword { get; set; } = string.Empty;
     }
 
+    public class VerifyEmailRequest
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Token { get; set; } = string.Empty;
+    }
+
     public class UsageQuota
     {
         public int MonthlyMemoriesUsed { get; set; }
@@ -64,6 +71,7 @@ namespace Application.DTOs
         public int MaxVideoDurationSeconds { get; set; }
         public string Quality { get; set; } = "standard";
         public bool HasWatermark { get; set; } = true;
+        public bool IsPremium { get; set; }
     }
 
     public class CreateCheckoutSessionRequest
@@ -77,11 +85,6 @@ namespace Application.DTOs
     {
         public string SessionUrl { get; set; } = string.Empty;
         public string SessionId { get; set; } = string.Empty;
-    }
-
-    public class GenerateRequest
-    {
-        public string Text { get; set; } = string.Empty;
     }
 
     public class PlanOption

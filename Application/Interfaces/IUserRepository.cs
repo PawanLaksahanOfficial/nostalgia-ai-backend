@@ -7,8 +7,13 @@ namespace Application.Interfaces
     {
         Task<User?> GetUserByEmailAsync(string email);
         Task<User?> GetUserByEmailIncludingDeletedAsync(string email);
+        Task<User?> GetUserByCanonicalEmailAsync(string email);
+        Task<int> CountUsersCreatedFromIpSinceAsync(string ipHash, DateTime since);
         Task<bool> UpdateUserLoginStatusAsync(User user);
-        Task<User?> RegisterUserAsync(RegisterRequest request, string passwordHash);
+        Task<User?> RegisterUserAsync(RegisterRequest request, string passwordHash, string? signupIpHash);
+        Task<bool> CreateEmailVerificationTokenAsync(EmailVerificationToken token);
+        Task<bool> VerifyEmailAsync(string email, string token);
+        Task<bool> MarkEmailVerifiedAsync(User user);
         Task<User?> ReactivateDeletedUserAsync(User existingUser, RegisterRequest request, string passwordHash);
         Task<bool> UpdatePasswordAsync(int userId, string passwordHash);
         Task<bool> CreatePasswordResetTokenAsync(PasswordResetToken resetToken);

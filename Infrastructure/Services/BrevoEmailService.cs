@@ -38,6 +38,13 @@ namespace Infrastructure.Services
             return await SendAsync(email, userName, content.Subject, content.HtmlBody, content.TextBody);
         }
 
+        public async Task<bool> SendEmailVerificationAsync(string email, string verificationToken, string userName)
+        {
+            var link = EmailTemplates.EmailVerificationLink(_frontendBaseUrl, verificationToken, email);
+            var content = EmailTemplates.EmailVerification(link, userName);
+            return await SendAsync(email, userName, content.Subject, content.HtmlBody, content.TextBody);
+        }
+
         public Task<bool> SendEmailAsync(string to, string subject, string body) =>
             SendAsync(to, null, subject, body, null);
 

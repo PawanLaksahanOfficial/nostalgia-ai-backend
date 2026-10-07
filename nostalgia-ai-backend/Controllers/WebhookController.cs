@@ -41,12 +41,20 @@ namespace nostalgia_ai_backend.Controllers
             Event stripeEvent;
             try
             {
-                stripeEvent = EventUtility.ConstructEvent(json, stripeSignature, webhookSecret);
+                // Stripe.net pins one API version. Rejecting events from an endpoint on another version would
+                // leave customers who paid on the free plan, so they are accepted and the mismatch is logged.
+                stripeEvent = EventUtility.ConstructEvent(json, stripeSignature, webhookSecret, throwOnApiVersionMismatch: false);
             }
             catch (StripeException ex)
             {
                 _logger.LogWarning(ex, "Stripe webhook signature verification failed.");
                 return BadRequest(ApiResponse.Fail("Invalid webhook signature."));
+            }
+            if (!string.Equals(stripeEvent.ApiVersion, StripeConfiguration.ApiVersion, StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Stripe webhook event {EventId} uses API version {EventApiVersion}, but this build expects {SdkApiVersion}. Set the webhook endpoint's API version to {SdkApiVersion} in the Stripe dashboard.",
+                    stripeEvent.Id, stripeEvent.ApiVersion, StripeConfiguration.ApiVersion, StripeConfiguration.ApiVersion);
             }
             var processed = await _subscriptionService.ProcessEventOnceAsync(
                 stripeEvent.Id,

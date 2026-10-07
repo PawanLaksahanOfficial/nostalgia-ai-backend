@@ -57,6 +57,20 @@ namespace Application.Validators
         }
     }
 
+    public class VerifyEmailRequestValidator : AbstractValidator<VerifyEmailRequest>
+    {
+        public VerifyEmailRequestValidator()
+        {
+            RuleFor(x => x.Email)
+                .NotEmpty().WithMessage("Email is required.")
+                .EmailAddress().WithMessage("Email must be a valid email address.");
+
+            RuleFor(x => x.Token)
+                .NotEmpty().WithMessage("Verification token is required.")
+                .MaximumLength(64).WithMessage("Verification token is not valid.");
+        }
+    }
+
     public class ResetPasswordRequestValidator : AbstractValidator<ResetPasswordRequest>
     {
         public ResetPasswordRequestValidator()

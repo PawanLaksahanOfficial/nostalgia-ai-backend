@@ -75,6 +75,33 @@ namespace nostalgia_ai_backend.Tests.Repositories
         }
 
         [Fact]
+        public async Task Daily_caps_keep_counting_videos_that_were_deleted()
+        {
+            var (userId, _) = await SeedAsync();
+            await using var context = new EFDbContext(_options);
+            var repository = new EfMemoryRepository(context);
+            var since = DateTime.UtcNow.AddDays(-1);
+
+            var first = await repository.CreateAsync(NewMemory(userId), "network-a");
+            await repository.CreateAsync(NewMemory(userId), "network-a");
+            await repository.CreateAsync(NewMemory(userId), "network-b");
+            await repository.CreateAsync(NewMemory(userId), null);
+            await repository.DeleteAsync(first);
+
+            Assert.Equal(2, await repository.CountRequestsFromIpSinceAsync("network-a", since));
+            Assert.Equal(4, await repository.CountRequestsSinceAsync(since));
+            Assert.Equal(0, await repository.CountRequestsSinceAsync(DateTime.UtcNow.AddMinutes(1)));
+        }
+
+        private static UserMemory NewMemory(int userId) => new()
+        {
+            UserId = userId,
+            Title = "Summer",
+            StoryText = "A long summer at the lake.",
+            CreatedAt = DateTime.UtcNow
+        };
+
+        [Fact]
         public async Task Setting_public_touches_only_the_visibility_flag()
         {
             var (_, memoryId) = await SeedAsync();

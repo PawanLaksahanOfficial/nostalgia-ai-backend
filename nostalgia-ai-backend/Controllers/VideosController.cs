@@ -19,6 +19,8 @@ namespace nostalgia_ai_backend.Controllers
         private readonly IShareLinkService _shareLinkService;
         private readonly IFileStorage _fileStorage;
         private readonly ISubscriptionService _subscriptionService;
+        private readonly IUserRepository _userRepository;
+        private readonly IpAddressHasher _ipAddressHasher;
         private readonly IConfiguration _configuration;
         private readonly ILogger<VideosController> _logger;
 
@@ -27,6 +29,8 @@ namespace nostalgia_ai_backend.Controllers
             IShareLinkService shareLinkService,
             IFileStorage fileStorage,
             ISubscriptionService subscriptionService,
+            IUserRepository userRepository,
+            IpAddressHasher ipAddressHasher,
             IConfiguration configuration,
             ILogger<VideosController> logger)
         {
@@ -34,6 +38,8 @@ namespace nostalgia_ai_backend.Controllers
             _shareLinkService = shareLinkService;
             _fileStorage = fileStorage;
             _subscriptionService = subscriptionService;
+            _userRepository = userRepository;
+            _ipAddressHasher = ipAddressHasher;
             _configuration = configuration;
             _logger = logger;
         }
@@ -45,7 +51,37 @@ namespace nostalgia_ai_backend.Controllers
         public async Task<ActionResult<ApiResponse<object>>> CreateVideo([FromForm] CreateVideoRequest request, IFormFile? image)
         {
             var userId = GetUserId();
+            var abuse = _configuration.GetSection("Abuse");
+            var user = await _userRepository.GetByIdAsync(userId)
+                ?? throw new UnauthorizedAccessException("Invalid user token.");
+            if (abuse.GetValue("RequireEmailVerification", true) && !user.EmailVerified)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse<object>.Fail(
+                    "Please verify your email address before creating videos. Check your inbox for the link."));
+            }
+
             var quota = await _subscriptionService.GetUsageQuotaAsync(userId);
+            var requesterIpHash = _ipAddressHasher.Hash(HttpContext.Connection.RemoteIpAddress);
+            // Free videos share one free AI quota, so cap them per network and across the whole site, however
+            // many accounts someone makes. Counts include deleted videos: they were generated all the same.
+            if (!quota.IsPremium)
+            {
+                var since = DateTime.UtcNow.AddDays(-1);
+                var perIpLimit = abuse.GetValue("PerIpDailyVideoLimit", 6);
+                if (requesterIpHash != null && perIpLimit > 0 &&
+                    await _memoryRepository.CountRequestsFromIpSinceAsync(requesterIpHash, since) >= perIpLimit)
+                {
+                    return StatusCode(StatusCodes.Status429TooManyRequests, ApiResponse<object>.Fail(
+                        "You've reached today's limit of free videos from your network. Please try again tomorrow."));
+                }
+                var globalLimit = abuse.GetValue("GlobalDailyVideoLimit", 40);
+                if (globalLimit > 0 && await _memoryRepository.CountRequestsSinceAsync(since) >= globalLimit)
+                {
+                    return StatusCode(StatusCodes.Status429TooManyRequests, ApiResponse<object>.Fail(
+                        "Nostalgia AI has made all the free videos it can today. Please try again tomorrow."));
+                }
+            }
+
             var maxImageBytes = _configuration.GetSection("Video").GetValue("MaxImageBytes", 10_485_760L);
             string? contentType = null;
             string? extension = null;
@@ -98,7 +134,7 @@ namespace nostalgia_ai_backend.Controllers
                     CreatedAt = DateTime.UtcNow
                 };
 
-                var id = await _memoryRepository.CreateAsync(memory);
+                var id = await _memoryRepository.CreateAsync(memory, requesterIpHash);
                 if (id <= 0)
                 {
                     await DeleteUploadedImageAsync(imageKey);
