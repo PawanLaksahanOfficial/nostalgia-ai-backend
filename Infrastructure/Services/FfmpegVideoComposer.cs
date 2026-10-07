@@ -36,6 +36,7 @@ namespace Infrastructure.Services
                 PrescaleStandard = section.GetValue("PrescaleStandard", 4),
                 PrescaleHd = section.GetValue("PrescaleHd", 2),
                 ZoomAmount = section.GetValue("ZoomAmount", 0.28),
+                CrossfadeSeconds = section.GetValue("CrossfadeSeconds", 0.8),
                 FallbackBackgroundColor = section["FallbackBackgroundColor"] ?? "0x2A2422",
                 Preset = section["Preset"] ?? "veryfast"
             };

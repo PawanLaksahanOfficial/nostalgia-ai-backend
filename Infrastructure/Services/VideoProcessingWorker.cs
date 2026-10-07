@@ -12,6 +12,8 @@ namespace Infrastructure.Services
     public class VideoProcessingWorker : BackgroundService
     {
         private const string ImageFileName = "source";
+        private const string StockPhotoFileNamePrefix = "stock";
+        private const int StockPhotoCreditMaxLength = 500;
         private const string VoiceFileName = "voice.mp3";
         private const string MusicFileNamePrefix = "music";
         private const string CaptionsFileName = "captions.srt";
@@ -25,6 +27,7 @@ namespace Infrastructure.Services
         private readonly TimeSpan _staleJobTimeout;
         private readonly int _maxConcurrentJobs;
         private readonly int _minDurationSeconds;
+        private readonly int _maxSlides;
         private readonly bool _keepIntermediates;
         private readonly string _fontPath;
         private DateTime _lastUnavailableWarning = DateTime.MinValue;
@@ -43,6 +46,7 @@ namespace Infrastructure.Services
             _staleJobTimeout = TimeSpan.FromMinutes(section.GetValue("StaleJobTimeoutMinutes", 20));
             _maxConcurrentJobs = Math.Max(1, section.GetValue("MaxConcurrentJobs", 1));
             _minDurationSeconds = Math.Max(4, section.GetValue("MinDurationSeconds", 8));
+            _maxSlides = Math.Clamp(section.GetValue("MaxSlides", 4), 1, 8);
             _keepIntermediates = section.GetValue("KeepIntermediates", false);
 
             var assetsPath = section["AssetsPath"] ?? "assets";
@@ -173,15 +177,17 @@ namespace Infrastructure.Services
             var textToSpeech = services.GetRequiredService<ITextToSpeech>();
             var composer = services.GetRequiredService<IVideoComposer>();
             var fileStorage = services.GetRequiredService<IFileStorage>();
+            var stockPhotos = services.GetRequiredService<IStockPhotoProvider>();
             var subscriptionService = services.GetRequiredService<ISubscriptionService>();
             var quota = await subscriptionService.GetUsageQuotaAsync(job.UserId);
             var maxDuration = Math.Max(_minDurationSeconds, quota.MaxVideoDurationSeconds);
             var highDefinition = string.Equals(quota.Quality, "hd", StringComparison.OrdinalIgnoreCase);
             var wordBudget = NarrativeTrimmer.WordBudgetForSeconds(maxDuration);
-            //  Step 1: narrative 
+            //  Step 1: narrative
             await SetStepAsync(dbContext, job, "Writing your story…", cancellationToken);
-            var narrative = await GenerateNarrativeAsync(aiService, job, wordBudget);
+            var (narrative, scenes, narrationSource) = await GenerateScriptAsync(aiService, job, wordBudget);
             job.GeneratedNarrative = narrative;
+            job.NarrationSource = narrationSource;
 
             // Step 2: music 
             await SetStepAsync(dbContext, job, "Picking the music…", cancellationToken);
@@ -191,9 +197,12 @@ namespace Infrastructure.Services
             await SetStepAsync(dbContext, job, "Recording the narration…", cancellationToken);
             var speech = await textToSpeech.SynthesizeAsync(narrative, Path.Combine(workingDirectory, VoiceFileName));
 
-            //  Step 4: composition 
+            //  Step 4: photos
+            await SetStepAsync(dbContext, job, "Finding photos for your story…", cancellationToken);
+            var imageFileNames = await GatherImagesAsync(fileStorage, stockPhotos, job, scenes, workingDirectory, cancellationToken);
+
+            //  Step 5: composition
             await SetStepAsync(dbContext, job, "Composing your video…", cancellationToken);
-            var imageFileName = await FetchImageAsync(fileStorage, job, workingDirectory);
             var fontAvailable = TryCopyFont(workingDirectory);
             var spokenSeconds = speech is { DurationSeconds: > 0 }
                 ? speech.DurationSeconds
@@ -204,7 +213,7 @@ namespace Infrastructure.Services
             {
                 MemoryId = job.Id,
                 WorkingDirectory = workingDirectory,
-                ImageFileName = imageFileName,
+                ImageFileNames = imageFileNames,
                 VoiceoverFileName = speech != null ? VoiceFileName : null,
                 MusicFileName = musicFileName,
                 CaptionsFileName = captionsFileName,
@@ -216,7 +225,7 @@ namespace Infrastructure.Services
                 AddWatermark = quota.HasWatermark && fontAvailable
             });
 
-            //  Step 5: publish 
+            //  Step 6: publish
             await SetStepAsync(dbContext, job, "Finishing up…", cancellationToken);
             job.FinalVideoPath = await StoreAsync(fileStorage, $"memories/{job.Id}/{OutputFileName}", composed.VideoFilePath, composed.ContentType);
             if (!string.IsNullOrEmpty(composed.ThumbnailFilePath))
@@ -242,26 +251,88 @@ namespace Infrastructure.Services
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        private async Task<string> GenerateNarrativeAsync(IAIService aiService, UserMemory job, int wordBudget)
+        private async Task<(string Narrative, List<string> Scenes, NarrationSource Source)> GenerateScriptAsync(
+            IAIService aiService, UserMemory job, int wordBudget)
         {
-            var prompt =
-                $"Retell this memory as a warm, nostalgic narration of about {wordBudget} words. " +
-                $"Write flowing prose with no headings or lists.\n\n{job.StoryText}";
-            string? narrative = null;
+            var prompt = StoryScriptParser.BuildPrompt(job.Title, job.StoryText, wordBudget, _maxSlides);
+            var script = new Application.DTOs.StoryScript();
             try
             {
-                narrative = await aiService.GenerateNostalgicTextAsync(prompt);
+                var reply = await aiService.GenerateNostalgicTextAsync(prompt);
+                script = StoryScriptParser.Parse(reply, _maxSlides);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Narrative generation threw for job {JobId}.", job.Id);
             }
+
+            var narrative = script.Narration;
+            var source = NarrationSource.Ai;
             if (string.IsNullOrWhiteSpace(narrative))
             {
                 _logger.LogWarning("No narrative was generated for job {JobId}; falling back to the submitted story.", job.Id);
                 narrative = job.StoryText;
+                source = NarrationSource.Original;
             }
-            return NarrativeTrimmer.Trim(narrative, wordBudget);
+            var scenes = script.Scenes.Count > 0
+                ? script.Scenes
+                : StoryScriptParser.FallbackScenes(job.Title, job.MusicMood, _maxSlides);
+            return (NarrativeTrimmer.Trim(narrative, wordBudget), scenes, source);
+        }
+
+        // The user's own photo always comes first; free stock photos fill the remaining slides.
+        private async Task<List<string>> GatherImagesAsync(
+            IFileStorage fileStorage,
+            IStockPhotoProvider stockPhotos,
+            UserMemory job,
+            IReadOnlyList<string> scenes,
+            string workingDirectory,
+            CancellationToken cancellationToken)
+        {
+            var images = new List<string>();
+            var userImage = await FetchImageAsync(fileStorage, job, workingDirectory);
+            if (userImage != null)
+            {
+                images.Add(userImage);
+            }
+
+            job.StockPhotoCredit = null;
+            if (!stockPhotos.IsEnabled)
+            {
+                if (images.Count == 0)
+                {
+                    _logger.LogInformation("No stock photo key (Pixabay:ApiKey or Pexels:ApiKey) is set, so job {JobId} has no photos and uses a plain background.", job.Id);
+                }
+                return images;
+            }
+
+            var usedPhotoIds = new HashSet<string>();
+            var photographers = new List<string>();
+            foreach (var scene in scenes)
+            {
+                if (images.Count >= _maxSlides)
+                {
+                    break;
+                }
+                var results = await stockPhotos.SearchAsync(scene, 3, cancellationToken);
+                var photo = results.FirstOrDefault(p => usedPhotoIds.Add(p.Id));
+                if (photo == null)
+                {
+                    continue;
+                }
+                var fileName = $"{StockPhotoFileNamePrefix}{images.Count}.jpg";
+                if (await stockPhotos.DownloadAsync(photo, Path.Combine(workingDirectory, fileName), cancellationToken))
+                {
+                    images.Add(fileName);
+                    if (!string.IsNullOrWhiteSpace(photo.PhotographerName))
+                    {
+                        photographers.Add(photo.PhotographerName.Trim());
+                    }
+                }
+            }
+
+            job.StockPhotoCredit = PhotoCreditBuilder.Build(photographers, stockPhotos.SourceName, StockPhotoCreditMaxLength);
+            return images;
         }
 
         private async Task<string?> CopyMusicAsync(

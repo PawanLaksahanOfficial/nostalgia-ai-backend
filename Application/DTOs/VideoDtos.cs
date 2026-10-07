@@ -40,6 +40,7 @@ namespace Application.DTOs
         public string OwnerFirstName { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
         public int ViewCount { get; set; }
+        public string? StockPhotoCredit { get; set; }
     }
 
     public enum ShareMediaKind
@@ -63,7 +64,8 @@ namespace Application.DTOs
     {
         public int MemoryId { get; set; }
         public string WorkingDirectory { get; set; } = string.Empty;
-        public string? ImageFileName { get; set; }
+        // Shown in order as a crossfaded slideshow; empty means a plain colour background.
+        public List<string> ImageFileNames { get; set; } = new();
         public string? VoiceoverFileName { get; set; }
         public string? MusicFileName { get; set; }
         public string? CaptionsFileName { get; set; }
@@ -102,5 +104,19 @@ namespace Application.DTOs
     {
         public string Name { get; set; } = string.Empty;
         public string FilePath { get; set; } = string.Empty;
+    }
+
+    public class StockPhoto
+    {
+        public string Id { get; set; } = string.Empty;
+        public string DownloadUrl { get; set; } = string.Empty;
+        public string PhotographerName { get; set; } = string.Empty;
+    }
+
+    // What the AI writes for a video: the narration plus short stock-photo search phrases for its scenes.
+    public class StoryScript
+    {
+        public string Narration { get; set; } = string.Empty;
+        public List<string> Scenes { get; set; } = new();
     }
 }

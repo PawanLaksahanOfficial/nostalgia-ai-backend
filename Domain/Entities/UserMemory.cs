@@ -20,6 +20,12 @@ namespace Domain.Entities
         Premium
     }
 
+    public enum NarrationSource
+    {
+        Ai,
+        Original
+    }
+
     public class UserMemory
     {
         public int Id { get; set; }
@@ -47,6 +53,9 @@ namespace Domain.Entities
         public string? ContentType { get; set; }
         public string? ProcessingStep { get; set; }
         public string? FailureReason { get; set; }
+        public NarrationSource? NarrationSource { get; set; }
+        // Credit for stock photos used in the video, e.g. "Ana Silva, Ravi Perera on Pixabay".
+        public string? StockPhotoCredit { get; set; }
         public DateTime? ProcessingStartedAt { get; set; }
         public ICollection<MemoryShareLink> ShareLinks { get; set; } = new List<MemoryShareLink>();
     }

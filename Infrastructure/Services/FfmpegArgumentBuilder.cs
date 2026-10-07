@@ -15,6 +15,7 @@ namespace Infrastructure.Services
         public int PrescaleStandard { get; set; } = 4;
         public int PrescaleHd { get; set; } = 2;
         public double ZoomAmount { get; set; } = 0.28;
+        public double CrossfadeSeconds { get; set; } = 0.8;
         public string FallbackBackgroundColor { get; set; } = "0x2A2422";
         public string Preset { get; set; } = "veryfast";
     }
@@ -26,7 +27,6 @@ namespace Infrastructure.Services
             var (width, height) = ParseResolution(request.HighDefinition ? options.HdResolution : options.StandardResolution);
             var fps = Math.Max(1, options.Fps);
             var duration = Math.Max(1.0, request.DurationSeconds);
-            var totalFrames = Math.Max(1, (int)Math.Round(duration * fps));
             var args = new List<string>
             {
                 "-nostdin",
@@ -35,11 +35,16 @@ namespace Infrastructure.Services
                 "-y"
             };
             var inputIndex = 0;
-            var hasImage = !string.IsNullOrWhiteSpace(request.ImageFileName);
-            if (hasImage)
+            var images = request.ImageFileNames.Where(name => !string.IsNullOrWhiteSpace(name)).ToList();
+            if (images.Count > 0)
             {
-                args.Add("-i");
-                args.Add(request.ImageFileName!);
+                // Each still is a single-frame input; zoompan stretches it to its segment length.
+                foreach (var image in images)
+                {
+                    args.Add("-i");
+                    args.Add(image);
+                    inputIndex++;
+                }
             }
             else
             {
@@ -47,8 +52,8 @@ namespace Infrastructure.Services
                 args.Add("lavfi");
                 args.Add("-i");
                 args.Add($"color=c={options.FallbackBackgroundColor}:s={width}x{height}:r={fps}:d={Num(duration)}");
+                inputIndex++;
             }
-            var videoInput = inputIndex++;
             int? voiceInput = null;
             if (!string.IsNullOrWhiteSpace(request.VoiceoverFileName))
             {
@@ -76,7 +81,7 @@ namespace Infrastructure.Services
             }
             var chains = new List<string>
             {
-                BuildVideoChain(request, options, videoInput, width, height, fps, totalFrames, hasImage)
+                BuildVideoChain(request, options, images.Count, width, height, fps, duration)
             };
             chains.Add(BuildAudioChain(options, voiceInput, musicInput, silenceInput, duration));
 
@@ -161,30 +166,45 @@ namespace Infrastructure.Services
         private static string BuildVideoChain(
             VideoCompositionRequest request,
             VideoEncodingOptions options,
-            int videoInput,
+            int imageCount,
             int width,
             int height,
             int fps,
-            int totalFrames,
-            bool hasImage)
+            double duration)
         {
-            var filters = new List<string>();
-            if (hasImage)
+            var chains = new List<string>();
+            string current;
+            if (imageCount == 0)
             {
-                var prescale = Math.Max(1, request.HighDefinition ? options.PrescaleHd : options.PrescaleStandard);
-                var wideWidth = width * prescale;
-                var wideHeight = height * prescale;
-                filters.Add($"scale={wideWidth}:{wideHeight}:force_original_aspect_ratio=increase");
-                filters.Add($"crop={wideWidth}:{wideHeight}");
-                var zoomPerFrame = options.ZoomAmount / totalFrames;
-                var maxZoom = 1 + options.ZoomAmount;
-                filters.Add(
-                    $"zoompan=z='min(1+{Num(zoomPerFrame, "0.#########")}*on,{Num(maxZoom, "0.####")})'" +
-                    $":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'" +
-                    $":d={totalFrames}:s={width}x{height}:fps={fps}");
+                // The colour source is input 0; Ken Burns makes no sense on a flat colour.
+                current = "[0:v]";
+            }
+            else
+            {
+                // n segments overlapping by `fade` seconds must add up to the full duration.
+                var fade = imageCount > 1
+                    ? Math.Min(options.CrossfadeSeconds, duration / imageCount / 3)
+                    : 0;
+                var segment = (duration + (imageCount - 1) * fade) / imageCount;
+                var segmentFrames = Math.Max(1, (int)Math.Ceiling(segment * fps));
+                // A full zoom on every short slide feels rushed, so slideshows zoom less per slide.
+                var zoomAmount = imageCount == 1 ? options.ZoomAmount : options.ZoomAmount * 0.6;
+
+                for (var i = 0; i < imageCount; i++)
+                {
+                    chains.Add($"[{i}:v]{KenBurns(request, options, width, height, fps, segmentFrames, zoomAmount, zoomIn: i % 2 == 0)}[s{i}]");
+                }
+
+                current = "[s0]";
+                for (var k = 1; k < imageCount; k++)
+                {
+                    var offset = k * (segment - fade);
+                    chains.Add($"{current}[s{k}]xfade=transition=fade:duration={Num(fade)}:offset={Num(offset)}[x{k}]");
+                    current = $"[x{k}]";
+                }
             }
 
-            filters.Add("format=yuv420p");
+            var filters = new List<string> { "format=yuv420p" };
 
             if (!string.IsNullOrWhiteSpace(request.CaptionsFileName))
             {
@@ -209,7 +229,37 @@ namespace Infrastructure.Services
                     ":box=1:boxcolor=black@0.35:boxborderw=8" +
                     ":x=w-tw-24:y=h-th-24");
             }
-            return $"[{videoInput}:v]{string.Join(",", filters)}[vout]";
+            chains.Add($"{current}{string.Join(",", filters)}[vout]");
+            return string.Join(";", chains);
+        }
+
+        // Rendered above the output size and scaled back down so the slow zoom doesn't shimmer.
+        private static string KenBurns(
+            VideoCompositionRequest request,
+            VideoEncodingOptions options,
+            int width,
+            int height,
+            int fps,
+            int frames,
+            double zoomAmount,
+            bool zoomIn)
+        {
+            var prescale = Math.Max(1, request.HighDefinition ? options.PrescaleHd : options.PrescaleStandard);
+            var wideWidth = width * prescale;
+            var wideHeight = height * prescale;
+            var zoomPerFrame = Num(zoomAmount / frames, "0.#########");
+            var maxZoom = Num(1 + zoomAmount, "0.####");
+            // Alternating zoom in and out keeps a slideshow from feeling repetitive.
+            var zoom = zoomIn
+                ? $"min(1+{zoomPerFrame}*on,{maxZoom})"
+                : $"max({maxZoom}-{zoomPerFrame}*on,1)";
+            return
+                $"scale={wideWidth}:{wideHeight}:force_original_aspect_ratio=increase," +
+                $"crop={wideWidth}:{wideHeight}," +
+                $"zoompan=z='{zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'" +
+                $":d={frames}:s={width}x{height}:fps={fps}," +
+                // xfade needs every segment in the same pixel format and aspect ratio.
+                "setsar=1,format=yuv420p";
         }
 
         private static string BuildAudioChain(

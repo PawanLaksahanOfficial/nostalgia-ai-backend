@@ -56,8 +56,7 @@ namespace Infrastructure.Services
             await PersistWithFreshTokenAsync(shareLink);
             if (!memory.IsPublic)
             {
-                memory.IsPublic = true;
-                await _memoryRepository.UpdateAsync(memory);
+                await _memoryRepository.SetPublicAsync(memoryId, true);
             }
             return ToDto(shareLink);
         }
@@ -86,8 +85,7 @@ namespace Infrastructure.Services
                 var memory = await _memoryRepository.GetByIdForUserAsync(shareLink.UserMemoryId, userId);
                 if (memory is { IsPublic: true })
                 {
-                    memory.IsPublic = false;
-                    await _memoryRepository.UpdateAsync(memory);
+                    await _memoryRepository.SetPublicAsync(memory.Id, false);
                 }
             }
         }
@@ -109,7 +107,8 @@ namespace Infrastructure.Services
                 DurationSeconds = memory.DurationSeconds,
                 OwnerFirstName = memory.User?.FirstName ?? string.Empty,
                 CreatedAt = memory.CreatedAt,
-                ViewCount = shareLink.ViewCount + 1
+                ViewCount = shareLink.ViewCount + 1,
+                StockPhotoCredit = memory.StockPhotoCredit
             };
         }
 
