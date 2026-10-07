@@ -157,6 +157,26 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     }
 });
 
+// On Render the connection comes from Render's proxy, so every visitor would share one rate-limit bucket.
+// Render sits behind Cloudflare, which puts the visitor's address in CF-Connecting-IP. Set ClientIpHeaders
+// only where the app is reachable solely through such a proxy, or clients could spoof the header.
+var clientIpHeaders = (builder.Configuration["ClientIpHeaders"] ?? string.Empty)
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+// Abuse protection: keyed hashes of client addresses, and the throwaway-email blocklist.
+builder.Services.AddSingleton<IpAddressHasher>();
+builder.Services.AddSingleton(provider =>
+{
+    var assetsPath = builder.Configuration.GetSection("Video")["AssetsPath"] ?? "assets";
+    if (!Path.IsPathRooted(assetsPath))
+    {
+        assetsPath = Path.Combine(AppContext.BaseDirectory, assetsPath);
+    }
+    return DisposableEmailDomains.FromFile(
+        Path.Combine(assetsPath, "disposable-email-domains.txt"),
+        provider.GetRequiredService<ILogger<DisposableEmailDomains>>());
+});
+
 // HTTP Clients
 builder.Services.AddHttpClient("OpenRouter", client =>
 {
@@ -242,6 +262,22 @@ if (trustedProxies.Count > 0)
 {
     app.UseForwardedHeaders();
 }
+if (clientIpHeaders.Length > 0)
+{
+    app.Use(async (context, next) =>
+    {
+        foreach (var header in clientIpHeaders)
+        {
+            var value = context.Request.Headers[header].ToString().Split(',')[0].Trim();
+            if (IPAddress.TryParse(value, out var address))
+            {
+                context.Connection.RemoteIpAddress = address;
+                break;
+            }
+        }
+        await next();
+    });
+}
 app.UseHttpsRedirection();
 
 app.UseCors("AllowFrontend");
@@ -250,7 +286,7 @@ app.UseRateLimiter();
 app.UseAuthorization();
 app.MapControllers();
 
-app.MapGet("/health", async (IVideoComposer composer, ITextToSpeech tts, EFDbContext db) =>
+app.MapGet("/health", async (HttpContext context, IVideoComposer composer, ITextToSpeech tts, EFDbContext db) =>
 {
     bool database;
     try
@@ -268,7 +304,9 @@ app.MapGet("/health", async (IVideoComposer composer, ITextToSpeech tts, EFDbCon
         status = database ? "Healthy" : "Degraded",
         database,
         ffmpeg,
-        tts = tts.IsEnabled
+        tts = tts.IsEnabled,
+        // The caller's own address as the server sees it; shows whether ClientIpHeaders works.
+        clientIp = context.Connection.RemoteIpAddress?.ToString()
     });
 });
 

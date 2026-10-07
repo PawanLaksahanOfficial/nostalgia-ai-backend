@@ -260,5 +260,38 @@ namespace nostalgia_ai_backend.Tests.Services
         {
             Assert.Equal("veryfast", FfmpegArgumentBuilder.ResolvePreset(preset));
         }
+
+        [Fact]
+        public void Zooms_in_full_colour_when_configured()
+        {
+            var options = new VideoEncodingOptions { FullChromaZoom = true };
+            var filters = string.Join(" ", FfmpegArgumentBuilder.BuildCompose(Request(), options));
+
+            Assert.Contains("format=yuv444p,zoompan=", filters);
+        }
+
+        [Fact]
+        public void Pans_instead_of_zooming_when_configured()
+        {
+            var options = new VideoEncodingOptions { MotionStyle = "pan" };
+            var filters = string.Join(" ", FfmpegArgumentBuilder.BuildCompose(Slideshow(2), options));
+
+            Assert.DoesNotContain("zoompan", filters);
+            // Each photo is scaled once and repeated, then the crop window moves across it.
+            Assert.Contains("loop=loop=", filters);
+            Assert.Contains("settb=1/30,setpts=N", filters);
+            Assert.Contains("[s0][s1]xfade=", filters);
+        }
+
+        [Fact]
+        public void Pans_a_whole_number_of_pixels_every_frame_in_alternating_directions()
+        {
+            // 12 px/s at the default 4x prescale and 30 fps is 1.6 px per frame, rounded to 2.
+            var options = new VideoEncodingOptions { MotionStyle = "pan", PanPixelsPerSecond = 12 };
+            var filters = string.Join(" ", FfmpegArgumentBuilder.BuildCompose(Slideshow(2, duration: 10), options));
+
+            Assert.Contains("x='n*2'", filters);
+            Assert.Matches(@"x='\d+-n\*2'", filters);
+        }
     }
 }

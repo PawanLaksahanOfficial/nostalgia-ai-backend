@@ -9,6 +9,11 @@ namespace Domain.Entities
         public string FirstName { get; set; } = string.Empty;
         public string LastName { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
+        // Email with Gmail dots and "+tag" suffixes removed, so aliases of one inbox count as one account.
+        public string? CanonicalEmail { get; set; }
+        public bool EmailVerified { get; set; }
+        // Keyed hash of the address the account was created from; caps sign-ups per network.
+        public string? SignupIpHash { get; set; }
         public string? PasswordHash { get; set; }
         public string? AvatarUrl { get; set; }
         public DateTime CreatedDate { get; set; }

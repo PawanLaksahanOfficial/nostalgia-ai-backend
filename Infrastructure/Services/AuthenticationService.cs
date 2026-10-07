@@ -183,7 +183,8 @@ namespace Infrastructure.Services
                     MonthlyMemoriesUsed = user.MonthlyMemoryCount,
                     MonthlyMemoriesLimit = isPremium
                         ? _configuration.GetValue("TierLimits:Premium:MonthlyMemories", 100)
-                        : _configuration.GetValue("TierLimits:Free:MonthlyMemories", 3)
+                        : _configuration.GetValue("TierLimits:Free:MonthlyMemories", 3),
+                    EmailVerified = user.EmailVerified
                 }
             };
         }

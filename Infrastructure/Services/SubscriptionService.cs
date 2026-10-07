@@ -64,7 +64,8 @@ namespace Infrastructure.Services
                 MonthlyMemoriesLimit = GetMonthlyMemoryLimit(isPremium),
                 MaxVideoDurationSeconds = GetMaxVideoDuration(isPremium),
                 Quality = GetQuality(isPremium),
-                HasWatermark = !isPremium
+                HasWatermark = !isPremium,
+                IsPremium = isPremium
             };
         }
 

@@ -2,6 +2,7 @@
 using Application.Interfaces;
 using Domain.Entities;
 using Infrastructure.Data;
+using Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Repositories
@@ -29,6 +30,16 @@ namespace Infrastructure.Repositories
                 .FirstOrDefaultAsync(x => x.Email == normalizedEmail);
         }
 
+        public async Task<User?> GetUserByCanonicalEmailAsync(string email)
+        {
+            var canonicalEmail = EmailCanonicalizer.Canonicalize(email);
+            return await _dbContext.Users
+                .FirstOrDefaultAsync(u => u.CanonicalEmail == canonicalEmail && !u.Deleted);
+        }
+
+        public Task<int> CountUsersCreatedFromIpSinceAsync(string ipHash, DateTime since) =>
+            _dbContext.Users.CountAsync(u => u.SignupIpHash == ipHash && u.CreatedDate >= since);
+
         public async Task<User?> GetByIdAsync(int userId)
         {
             return await _dbContext.Users
@@ -43,13 +54,16 @@ namespace Infrastructure.Repositories
             return rowsAffected > 0;
         }
 
-        public async Task<User?> RegisterUserAsync(RegisterRequest request, string passwordHash)
+        public async Task<User?> RegisterUserAsync(RegisterRequest request, string passwordHash, string? signupIpHash)
         {
             var user = new User
             {
                 FirstName = request.FirstName,
                 LastName = request.LastName,
                 Email = request.Email.Trim().ToLowerInvariant(),
+                CanonicalEmail = EmailCanonicalizer.Canonicalize(request.Email),
+                EmailVerified = false,
+                SignupIpHash = signupIpHash,
                 PasswordHash = passwordHash,
                 CreatedDate = DateTime.UtcNow,
                 LastUpdatedDate = DateTime.UtcNow,
@@ -70,11 +84,59 @@ namespace Infrastructure.Repositories
             existingUser.FirstName = request.FirstName;
             existingUser.LastName = request.LastName;
             existingUser.PasswordHash = passwordHash;
+            // Whoever re-registers must prove they own the inbox, like a new sign-up.
+            existingUser.EmailVerified = false;
+            existingUser.CanonicalEmail = EmailCanonicalizer.Canonicalize(existingUser.Email);
             existingUser.Deleted = false;
             existingUser.Active = true;
             existingUser.LastUpdatedDate = DateTime.UtcNow;
             var rowsAffected = await _dbContext.SaveChangesAsync();
             return rowsAffected > 0 ? existingUser : null;
+        }
+
+        public async Task<bool> CreateEmailVerificationTokenAsync(EmailVerificationToken token)
+        {
+            _dbContext.EmailVerificationTokens.Add(token);
+            var rowsAffected = await _dbContext.SaveChangesAsync();
+            return rowsAffected > 0;
+        }
+
+        public async Task<bool> VerifyEmailAsync(string email, string token)
+        {
+            var normalizedEmail = email.Trim().ToLowerInvariant();
+            var record = await _dbContext.EmailVerificationTokens
+                .Include(t => t.User)
+                .FirstOrDefaultAsync(t => t.User.Email == normalizedEmail && t.Token == token && !t.User.Deleted);
+            if (record == null)
+            {
+                return false;
+            }
+            if (record.User.EmailVerified)
+            {
+                // The same link opened twice.
+                return true;
+            }
+            if (record.Used || record.ExpiresAt <= DateTime.UtcNow)
+            {
+                return false;
+            }
+            record.Used = true;
+            record.User.EmailVerified = true;
+            record.User.LastUpdatedDate = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> MarkEmailVerifiedAsync(User user)
+        {
+            if (user.EmailVerified)
+            {
+                return true;
+            }
+            user.EmailVerified = true;
+            user.LastUpdatedDate = DateTime.UtcNow;
+            var rowsAffected = await _dbContext.SaveChangesAsync();
+            return rowsAffected > 0;
         }
 
         public async Task<bool> UpdatePasswordAsync(int userId, string passwordHash)
@@ -128,6 +190,8 @@ namespace Infrastructure.Repositories
                 .ToListAsync();
 
             user.PasswordHash = passwordHash;
+            // The reset link was emailed, so using it proves the inbox is theirs.
+            user.EmailVerified = true;
             user.LastUpdatedDate = DateTime.UtcNow;
             foreach (var token in outstandingTokens)
             {
@@ -166,6 +230,9 @@ namespace Infrastructure.Repositories
                 FirstName = model.FirstName,
                 LastName = model.LastName,
                 Email = model.Email.Trim().ToLowerInvariant(),
+                CanonicalEmail = EmailCanonicalizer.Canonicalize(model.Email),
+                // Google and Meta only hand over addresses they have verified.
+                EmailVerified = true,
                 CreatedDate = DateTime.UtcNow,
                 LastUpdatedDate = DateTime.UtcNow,
                 LastSignInDate = DateTime.UtcNow,
@@ -184,6 +251,8 @@ namespace Infrastructure.Repositories
         {
             existingUser.FirstName = model.FirstName;
             existingUser.LastName = model.LastName;
+            existingUser.EmailVerified = true;
+            existingUser.CanonicalEmail = EmailCanonicalizer.Canonicalize(existingUser.Email);
             existingUser.Deleted = false;
             existingUser.Active = true;
             existingUser.LastUpdatedDate = DateTime.UtcNow;

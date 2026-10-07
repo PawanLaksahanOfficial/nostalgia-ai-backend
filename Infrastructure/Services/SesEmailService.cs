@@ -35,6 +35,13 @@ namespace Infrastructure.Services
             return await SendAsync(email, content.Subject, content.HtmlBody, content.TextBody);
         }
 
+        public async Task<bool> SendEmailVerificationAsync(string email, string verificationToken, string userName)
+        {
+            var link = EmailTemplates.EmailVerificationLink(_frontendBaseUrl, verificationToken, email);
+            var content = EmailTemplates.EmailVerification(link, userName);
+            return await SendAsync(email, content.Subject, content.HtmlBody, content.TextBody);
+        }
+
         public Task<bool> SendEmailAsync(string to, string subject, string body) =>
             SendAsync(to, subject, body, "Please view this email in an HTML-compatible email client.");
 

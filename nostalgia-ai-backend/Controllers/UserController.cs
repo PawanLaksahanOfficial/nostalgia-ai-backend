@@ -34,9 +34,13 @@ namespace nostalgia_ai_backend.Controllers
                 return Unauthorized(ApiResponse<AuthResponse>.Fail("Invalid social authentication token."));
             }
 
-            var existingUser = await _userRepository.GetUserByEmailIncludingDeletedAsync(socialProfile.Email);
+            // A Gmail address that differs only by dots or a "+tag" is the same inbox, so the same account.
+            var existingUser = await _userRepository.GetUserByEmailIncludingDeletedAsync(socialProfile.Email)
+                ?? await _userRepository.GetUserByCanonicalEmailAsync(socialProfile.Email);
             if (existingUser != null && !existingUser.Deleted)
             {
+                // Google and Meta vouch for the address, which also confirms an account made with a password.
+                await _userRepository.MarkEmailVerifiedAsync(existingUser);
                 var status = await _userRepository.UpdateUserLoginStatusAsync(existingUser);
                 if (!status)
                 {

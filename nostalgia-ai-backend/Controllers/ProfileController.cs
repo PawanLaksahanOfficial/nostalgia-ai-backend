@@ -138,6 +138,7 @@ namespace nostalgia_ai_backend.Controllers
                 user.FirstName,
                 user.LastName,
                 user.Email,
+                user.EmailVerified,
                 user.AvatarUrl,
                 Tier = user.Tier.ToString().ToLower(),
                 Quota = quota

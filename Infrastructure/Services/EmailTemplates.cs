@@ -48,5 +48,48 @@ namespace Infrastructure.Services
                 "If you didn't request this, you can safely ignore this email.";
             return new EmailContent("Reset Your Password - Nostalgia AI", html, text);
         }
+
+        public static string EmailVerificationLink(string frontendBaseUrl, string verificationToken, string email) =>
+            $"{frontendBaseUrl.TrimEnd('/')}/verify-email?token={Uri.EscapeDataString(verificationToken)}&email={Uri.EscapeDataString(email)}";
+
+        public static EmailContent EmailVerification(string verificationLink, string userName)
+        {
+            var safeName = WebUtility.HtmlEncode(userName);
+            var safeLink = WebUtility.HtmlEncode(verificationLink);
+            var html = $@"
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset='utf-8'>
+                </head>
+                <body style='font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f4;'>
+                    <div style='max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 30px;'>
+                        <h1 style='color: #333;'>Confirm Your Email</h1>
+                        <p>Hi {safeName},</p>
+                        <p>Thanks for joining Nostalgia AI. Confirm your email address to start creating videos.</p>
+                        <p>This link is valid for 24 hours.</p>
+                        <div style='text-align: center; margin: 30px 0;'>
+                            <a href='{safeLink}'
+                               style='background-color: #007bff; color: #ffffff; padding: 12px 30px;
+                                      text-decoration: none; border-radius: 5px; font-size: 16px;'>
+                                Confirm Email
+                            </a>
+                        </div>
+                        <p>If you didn't create an account, you can safely ignore this email.</p>
+                        <p>If the button doesn't work, copy and paste this link into your browser:</p>
+                        <p style='word-break: break-all; color: #666;'>{safeLink}</p>
+                        <hr style='border: none; border-top: 1px solid #eee; margin: 20px 0;'>
+                        <p style='color: #999; font-size: 12px;'>Nostalgia AI - Preserving your precious memories</p>
+                    </div>
+                </body>
+                </html>";
+            var text =
+                $"Hi {userName},\n\n" +
+                "Thanks for joining Nostalgia AI. Confirm your email address to start creating videos. " +
+                "This link is valid for 24 hours:\n\n" +
+                $"{verificationLink}\n\n" +
+                "If you didn't create an account, you can safely ignore this email.";
+            return new EmailContent("Confirm Your Email - Nostalgia AI", html, text);
+        }
     }
 }
