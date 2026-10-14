@@ -14,6 +14,8 @@ namespace Application.Interfaces
         Task<GoogleJsonWebSignature.Payload?> ValidateGoogleAuthenticationTokenAsync(string token);
         Task<MetaUserDto?> ValidateMetaAuthenticationTokenAsync(string token);
         string GenerateJwtToken(int userId);
-        AuthResponse BuildAuthResponse(User user);
+        AuthResponse BuildAuthResponse(User user, string refreshToken);
+        // Starts a new session: a fresh access token plus the first refresh token.
+        Task<AuthResponse> SignInAsync(User user);
     }
 }

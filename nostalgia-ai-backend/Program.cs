@@ -81,6 +81,17 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0
             }));
 
+    // Refresh and sign-out run every few minutes per open tab.
+    options.AddPolicy("token-refresh", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: GetClientIp(httpContext),
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
+
     options.AddPolicy("ai-generation", httpContext =>
         RateLimitPartition.GetTokenBucketLimiter(
             partitionKey: GetUserOrIp(httpContext),
@@ -136,7 +147,8 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         ValidIssuer = builder.Configuration["JwtSettings:Issuer"],
         ValidAudience = builder.Configuration["JwtSettings:Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+        ClockSkew = TimeSpan.FromSeconds(30)
     };
 });
 
@@ -157,9 +169,6 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     }
 });
 
-// On Render the connection comes from Render's proxy, so every visitor would share one rate-limit bucket.
-// Render sits behind Cloudflare, which puts the visitor's address in CF-Connecting-IP. Set ClientIpHeaders
-// only where the app is reachable solely through such a proxy, or clients could spoof the header.
 var clientIpHeaders = (builder.Configuration["ClientIpHeaders"] ?? string.Empty)
     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -191,8 +200,9 @@ builder.Services.AddScoped<IMemoryRepository, EfMemoryRepository>();
 builder.Services.AddScoped<IPasswordHasher, PasswordHasherService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
+builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 
-// Email: Brevo's free HTTP API by default; SES stays available for later.
+// Email: Brevo's free HTTP API by default
 if (string.Equals(builder.Configuration.GetSection("Email")["Provider"], "ses", StringComparison.OrdinalIgnoreCase))
 {
     builder.Services.AddScoped<IEmailService, SesEmailService>();
@@ -209,8 +219,7 @@ builder.Services.AddScoped<IShareLinkService, ShareLinkService>();
 builder.Services.AddScoped<IVideoComposer, FfmpegVideoComposer>();
 builder.Services.AddScoped<IMusicProvider, BundledMusicProvider>();
 
-// Free stock photos give every video visuals. Pixabay is used when its key is set (Pexels paused new
-// API keys in October 2026); otherwise Pexels, which is a no-op without Pexels:ApiKey.
+// Free stock photos give every video visuals
 if (!string.IsNullOrWhiteSpace(builder.Configuration["Pixabay:ApiKey"]))
 {
     // Pixabay takes the key in the query string, which HttpClient's request logging would write out.

@@ -109,6 +109,34 @@ namespace nostalgia_ai_backend.Tests.Validators
         }
     }
 
+    public class RefreshTokenRequestValidatorTests
+    {
+        private readonly RefreshTokenRequestValidator _validator = new();
+
+        [Fact]
+        public void Passes_for_a_well_formed_token()
+        {
+            var result = _validator.TestValidate(new RefreshTokenRequest { RefreshToken = new string('a', 43) });
+            result.ShouldNotHaveAnyValidationErrors();
+        }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("   ")]
+        public void Fails_when_the_token_is_missing(string token)
+        {
+            var result = _validator.TestValidate(new RefreshTokenRequest { RefreshToken = token });
+            result.ShouldHaveValidationErrorFor(x => x.RefreshToken);
+        }
+
+        [Fact]
+        public void Fails_when_the_token_is_too_long()
+        {
+            var result = _validator.TestValidate(new RefreshTokenRequest { RefreshToken = new string('a', 101) });
+            result.ShouldHaveValidationErrorFor(x => x.RefreshToken);
+        }
+    }
+
     public class ResetPasswordRequestValidatorTests
     {
         private readonly ResetPasswordRequestValidator _validator = new();

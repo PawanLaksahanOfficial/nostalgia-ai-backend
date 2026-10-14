@@ -275,8 +275,7 @@ namespace nostalgia_ai_backend.Controllers
             await ServeAsync(id, thumbnail: true, asAttachment: false);
 
         [HttpPost("{id:int}/share")]
-        public async Task<ActionResult<ApiResponse<ShareLinkDto>>> CreateShareLink(
-            int id, [FromBody] CreateShareLinkRequest request)
+        public async Task<ActionResult<ApiResponse<ShareLinkDto>>> CreateShareLink(int id, [FromBody] CreateShareLinkRequest request)
         {
             var userId = GetUserId();
             if (await _memoryRepository.GetByIdForUserAsync(id, userId) == null)
