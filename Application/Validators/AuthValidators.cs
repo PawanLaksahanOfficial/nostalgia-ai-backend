@@ -71,6 +71,16 @@ namespace Application.Validators
         }
     }
 
+    public class RefreshTokenRequestValidator : AbstractValidator<RefreshTokenRequest>
+    {
+        public RefreshTokenRequestValidator()
+        {
+            RuleFor(x => x.RefreshToken)
+                .NotEmpty().WithMessage("Refresh token is required.")
+                .MaximumLength(100).WithMessage("Refresh token is not valid.");
+        }
+    }
+
     public class ResetPasswordRequestValidator : AbstractValidator<ResetPasswordRequest>
     {
         public ResetPasswordRequestValidator()

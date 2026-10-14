@@ -231,7 +231,6 @@ namespace Infrastructure.Repositories
                 LastName = model.LastName,
                 Email = model.Email.Trim().ToLowerInvariant(),
                 CanonicalEmail = EmailCanonicalizer.Canonicalize(model.Email),
-                // Google and Meta only hand over addresses they have verified.
                 EmailVerified = true,
                 CreatedDate = DateTime.UtcNow,
                 LastUpdatedDate = DateTime.UtcNow,

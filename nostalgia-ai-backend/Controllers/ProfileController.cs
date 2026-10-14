@@ -26,6 +26,8 @@ namespace nostalgia_ai_backend.Controllers
         private readonly IMemoryRepository _memoryRepository;
         private readonly IPasswordHasher _passwordHasher;
         private readonly IFileStorage _fileStorage;
+        private readonly IAuthenticationService _authenticationService;
+        private readonly IRefreshTokenService _refreshTokenService;
         private readonly ILogger<ProfileController> _logger;
 
         public ProfileController(
@@ -34,6 +36,8 @@ namespace nostalgia_ai_backend.Controllers
             IMemoryRepository memoryRepository,
             IPasswordHasher passwordHasher,
             IFileStorage fileStorage,
+            IAuthenticationService authenticationService,
+            IRefreshTokenService refreshTokenService,
             ILogger<ProfileController> logger)
         {
             _userRepository = userRepository;
@@ -41,6 +45,8 @@ namespace nostalgia_ai_backend.Controllers
             _memoryRepository = memoryRepository;
             _passwordHasher = passwordHasher;
             _fileStorage = fileStorage;
+            _authenticationService = authenticationService;
+            _refreshTokenService = refreshTokenService;
             _logger = logger;
         }
 
@@ -182,7 +188,11 @@ namespace nostalgia_ai_backend.Controllers
                 return BadRequest(ApiResponse<object>.Fail("Failed to update password."));
             }
 
-            return Ok(ApiResponse<object>.Ok(new { }, "Password changed successfully."));
+            await _refreshTokenService.RevokeAllAsync(userId);
+            var session = await _authenticationService.SignInAsync(user);
+            return Ok(ApiResponse<object>.Ok(
+                new { session.Token, session.RefreshToken },
+                "Password changed. Other devices have been signed out."));
         }
 
         [HttpGet("memories")]

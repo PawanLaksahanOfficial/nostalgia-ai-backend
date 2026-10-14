@@ -16,6 +16,7 @@ namespace Infrastructure.Data
         public DbSet<VideoRequest> VideoRequests { get; set; }
         public DbSet<ProcessedStripeEvent> ProcessedStripeEvents { get; set; }
         public DbSet<MemoryShareLink> MemoryShareLinks { get; set; }
+        public DbSet<RefreshToken> RefreshTokens { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -60,6 +61,18 @@ namespace Infrastructure.Data
             modelBuilder.Entity<EmailVerificationToken>(entity =>
             {
                 entity.Property(t => t.Token).HasMaxLength(64).IsRequired();
+                entity.HasOne(t => t.User)
+                      .WithMany()
+                      .HasForeignKey(t => t.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<RefreshToken>(entity =>
+            {
+                entity.Property(t => t.TokenHash).HasMaxLength(64).IsRequired();
+                entity.HasIndex(t => t.TokenHash).IsUnique();
+                entity.HasIndex(t => t.UserId);
+                entity.HasIndex(t => t.FamilyId);
                 entity.HasOne(t => t.User)
                       .WithMany()
                       .HasForeignKey(t => t.UserId)

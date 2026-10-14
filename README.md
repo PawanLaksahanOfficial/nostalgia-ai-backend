@@ -141,7 +141,7 @@ In production, supply the same keys as environment variables using `__` for nest
 | Section | Keys | Notes |
 | --- | --- | --- |
 | `ConnectionStrings` | `DefaultConnection` | PostgreSQL (Npgsql) |
-| `JwtSettings` | `Key`, `Issuer`, `Audience`, `DurationInMinutes` | `Key` is a secret |
+| `JwtSettings` | `Key`, `Issuer`, `Audience`, `DurationInMinutes`, `RefreshTokenDays` | `Key` is a secret. `DurationInMinutes` is the access token's lifetime (15); `RefreshTokenDays` is how long a session lasts without use (30) |
 | `AllowedOrigins` | comma-separated origins | Must include the deployed frontend origin |
 | `ClientIpHeaders` | comma-separated header names | Where the visitor's address comes from behind a proxy. Production uses `CF-Connecting-IP` (Render sits behind Cloudflare); without it every visitor shares Render's proxy address and one rate-limit bucket. Leave empty when the app is directly exposed. `/health` reports the `clientIp` it resolved |
 | `Abuse` | `RequireEmailVerification`, `GlobalDailyVideoLimit`, `PerIpDailyVideoLimit`, `PerIpDailySignupLimit`, `IpHashSecret` | See [Abuse protection](#abuse-protection). Caps are rolling 24-hour windows; `0` disables one. `IpHashSecret` keys the address hashes and defaults to the JWT key |
@@ -168,13 +168,18 @@ All responses use a consistent envelope:
 { "success": true, "message": "Success", "data": { }, "errors": null }
 ```
 
-Authenticated routes expect `Authorization: Bearer <jwt>`.
+Authenticated routes expect `Authorization: Bearer <jwt>`. Sign-in returns a short-lived access
+token (`token`) and a `refreshToken`. Refresh tokens are stored hashed in `RefreshTokens` and rotated on every
+use; presenting one that was already rotated revokes that whole session, and a password change or
+reset revokes every session.
 
 ### Auth — `/api/auth`, `/api/user`
 | Method | Route | Auth |
 | --- | --- | --- |
 | POST | `/api/auth/register` | — |
 | POST | `/api/auth/login` | — |
+| POST | `/api/auth/refresh` | Refresh token in the body; returns new `token` + `refreshToken` |
+| POST | `/api/auth/logout` | Refresh token in the body; revokes that session |
 | POST | `/api/auth/verify-email` | — |
 | POST | `/api/auth/resend-verification` | Bearer |
 | POST | `/api/auth/forgot-password` | — |
@@ -204,7 +209,8 @@ and `/api/webhook/stripe`. Stripe events are de-duplicated via `ProcessedStripeE
 redelivery is safe, and events from a webhook endpoint on a different Stripe API version are
 accepted with a logged warning.
 
-Rate limiting is applied per policy — `auth` on sign-in and sign-up, `ai-generation` on video
+Rate limiting is applied per policy — `auth` on sign-in and sign-up, `token-refresh` on refresh and
+sign-out, `ai-generation` on video
 creation, `share-view` on public share reads — and media streaming is explicitly exempt.
 
 ---

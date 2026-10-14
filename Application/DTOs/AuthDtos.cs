@@ -17,7 +17,19 @@ namespace Application.DTOs
     public class AuthResponse
     {
         public string Token { get; set; } = string.Empty;
+        public string RefreshToken { get; set; } = string.Empty;
         public UserDto User { get; set; } = null!;
+    }
+
+    public class RefreshTokenRequest
+    {
+        public string RefreshToken { get; set; } = string.Empty;
+    }
+
+    public class RotatedRefreshToken
+    {
+        public int UserId { get; set; }
+        public string RefreshToken { get; set; } = string.Empty;
     }
 
     public class UserDto

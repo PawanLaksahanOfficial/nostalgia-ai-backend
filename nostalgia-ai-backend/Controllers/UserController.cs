@@ -47,7 +47,7 @@ namespace nostalgia_ai_backend.Controllers
                     return BadRequest(ApiResponse<AuthResponse>.Fail("Failed to update login status."));
                 }
                 return Ok(ApiResponse<AuthResponse>.Ok(
-                    _authenticationService.BuildAuthResponse(existingUser), "Authentication successful."));
+                    await _authenticationService.SignInAsync(existingUser), "Authentication successful."));
             }
             var userModel = new UserModel
             {
@@ -65,7 +65,7 @@ namespace nostalgia_ai_backend.Controllers
             }
 
             return Ok(ApiResponse<AuthResponse>.Ok(
-                _authenticationService.BuildAuthResponse(user), "Authentication successful."));
+                await _authenticationService.SignInAsync(user), "Authentication successful."));
         }
 
         private async Task<SocialProfile?> ResolveSocialProfileAsync(LoginToken request)

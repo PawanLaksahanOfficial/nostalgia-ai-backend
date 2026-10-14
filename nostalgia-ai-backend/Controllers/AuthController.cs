@@ -19,6 +19,7 @@ namespace nostalgia_ai_backend.Controllers
         private readonly IPasswordHasher _passwordHasher;
         private readonly IUserRepository _userRepository;
         private readonly IAuthenticationService _authenticationService;
+        private readonly IRefreshTokenService _refreshTokenService;
         private readonly IEmailService _emailService;
         private readonly IpAddressHasher _ipAddressHasher;
         private readonly DisposableEmailDomains _disposableEmailDomains;
@@ -29,6 +30,7 @@ namespace nostalgia_ai_backend.Controllers
             IPasswordHasher passwordHasher,
             IUserRepository userRepository,
             IAuthenticationService authenticationService,
+            IRefreshTokenService refreshTokenService,
             IEmailService emailService,
             IpAddressHasher ipAddressHasher,
             DisposableEmailDomains disposableEmailDomains,
@@ -38,6 +40,7 @@ namespace nostalgia_ai_backend.Controllers
             _passwordHasher = passwordHasher;
             _userRepository = userRepository;
             _authenticationService = authenticationService;
+            _refreshTokenService = refreshTokenService;
             _emailService = emailService;
             _ipAddressHasher = ipAddressHasher;
             _disposableEmailDomains = disposableEmailDomains;
@@ -88,7 +91,7 @@ namespace nostalgia_ai_backend.Controllers
                     }
 
                     await SendVerificationEmailAsync(reactivatedUser);
-                    var response = CreateAuthResponse(reactivatedUser);
+                    var response = await _authenticationService.SignInAsync(reactivatedUser);
                     return Ok(ApiResponse<AuthResponse>.Ok(response, "Account reactivated. Check your inbox to verify your email."));
                 }
 
@@ -100,7 +103,7 @@ namespace nostalgia_ai_backend.Controllers
                 }
 
                 await SendVerificationEmailAsync(newUser);
-                var authResponse = CreateAuthResponse(newUser);
+                var authResponse = await _authenticationService.SignInAsync(newUser);
                 return Ok(ApiResponse<AuthResponse>.Ok(authResponse, "Registration successful. Check your inbox to verify your email."));
             }
             catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
@@ -129,8 +132,39 @@ namespace nostalgia_ai_backend.Controllers
                 return BadRequest(ApiResponse<AuthResponse>.Fail("Failed to update login status."));
             }
 
-            var response = CreateAuthResponse(user);
+            var response = await _authenticationService.SignInAsync(user);
             return Ok(ApiResponse<AuthResponse>.Ok(response, "Login successful."));
+        }
+
+        [HttpPost("refresh")]
+        [EnableRateLimiting("token-refresh")]
+        public async Task<ActionResult<ApiResponse<AuthResponse>>> Refresh([FromBody] RefreshTokenRequest request)
+        {
+            const string expiredMessage = "Your session has expired. Please sign in again.";
+            var rotated = await _refreshTokenService.RotateAsync(request.RefreshToken);
+            if (rotated == null)
+            {
+                return Unauthorized(ApiResponse<AuthResponse>.Fail(expiredMessage));
+            }
+
+            var user = await _userRepository.GetByIdAsync(rotated.UserId);
+            if (user == null)
+            {
+                // The account was deleted while signed in.
+                await _refreshTokenService.RevokeAllAsync(rotated.UserId);
+                return Unauthorized(ApiResponse<AuthResponse>.Fail(expiredMessage));
+            }
+
+            return Ok(ApiResponse<AuthResponse>.Ok(
+                _authenticationService.BuildAuthResponse(user, rotated.RefreshToken), "Session refreshed."));
+        }
+
+        [HttpPost("logout")]
+        [EnableRateLimiting("token-refresh")]
+        public async Task<ActionResult<ApiResponse<object>>> Logout([FromBody] RefreshTokenRequest request)
+        {
+            await _refreshTokenService.RevokeAsync(request.RefreshToken);
+            return Ok(ApiResponse<object>.Ok(new { }, "Signed out."));
         }
 
         [HttpPost("forgot-password")]
@@ -190,7 +224,7 @@ namespace nostalgia_ai_backend.Controllers
             {
                 return BadRequest(ApiResponse<object>.Fail("Failed to update password."));
             }
-
+            await _refreshTokenService.RevokeAllAsync(resetToken.UserId);
             return Ok(ApiResponse<object>.Ok(new { }, "Password reset successful."));
         }
 
@@ -243,9 +277,6 @@ namespace nostalgia_ai_backend.Controllers
                 _logger.LogError("Failed to send the verification email for user {UserId}.", user.UserId);
             }
         }
-
-        private AuthResponse CreateAuthResponse(User user) =>
-            _authenticationService.BuildAuthResponse(user);
 
         private static bool IsUniqueConstraintViolation(DbUpdateException ex)
         {

@@ -23,17 +23,20 @@ namespace Infrastructure.Services
         private readonly EFDbContext _dbContext;
         private readonly IConfiguration _configuration;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IRefreshTokenService _refreshTokenService;
         private readonly ILogger<AuthenticationService> _logger;
 
         public AuthenticationService(
             EFDbContext dbContext,
             IConfiguration configuration,
             IHttpClientFactory httpClientFactory,
+            IRefreshTokenService refreshTokenService,
             ILogger<AuthenticationService> logger)
         {
             _dbContext = dbContext;
             _configuration = configuration;
             _httpClientFactory = httpClientFactory;
+            _refreshTokenService = refreshTokenService;
             _logger = logger;
         }
 
@@ -64,7 +67,6 @@ namespace Infrastructure.Services
             }
             catch (InvalidJwtException ex)
             {
-                // Client IDs are public, so logging them makes an audience mismatch obvious.
                 _logger.LogWarning("Google sign-in rejected: {Reason} Accepted client IDs: {ClientIds}.",
                     ex.Message, string.Join(", ", clientIds));
                 return null;
@@ -166,12 +168,19 @@ namespace Infrastructure.Services
             return string.Empty;
         }
 
-        public AuthResponse BuildAuthResponse(User user)
+        public async Task<AuthResponse> SignInAsync(User user)
+        {
+            var refreshToken = await _refreshTokenService.IssueAsync(user.UserId);
+            return BuildAuthResponse(user, refreshToken);
+        }
+
+        public AuthResponse BuildAuthResponse(User user, string refreshToken)
         {
             var isPremium = user.IsPremiumActive();
             return new AuthResponse
             {
                 Token = GenerateJwtToken(user.UserId),
+                RefreshToken = refreshToken,
                 User = new UserDto
                 {
                     UserId = user.UserId,
